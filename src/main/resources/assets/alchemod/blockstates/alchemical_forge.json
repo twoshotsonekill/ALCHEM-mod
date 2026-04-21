@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "alchemod:block/alchemical_forge" }
+  }
+}

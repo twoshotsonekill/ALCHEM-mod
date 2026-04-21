@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "alchemod",
+  "version": "${version}",
+  "name": "Alchemod — AI Combiner",
+  "description": "Right-click the Alchemical Forge, slot two items, and let AI decide what they become.",
+  "authors": ["Alchemod"],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main":   ["com.alchemod.AlchemodInit"],
+    "client": ["com.alchemod.AlchemodClient"]
+  },
+  "mixins": [],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21",
+    "java": ">=21"
+  }
+}

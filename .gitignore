@@ -1,0 +1,17 @@
+# Gradle
+.gradle/
+build/
+gradle-8.5-bin.zip
+
+# IDE
+.classpath
+.factorypath
+.project
+.settings/
+bin/
+*.iml
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
