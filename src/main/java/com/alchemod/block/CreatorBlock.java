@@ -1,7 +1,6 @@
 package com.alchemod.block;
 
 import com.alchemod.AlchemodInit;
-import com.alchemod.block.CreatorBlockEntity;
 import net.minecraft.block.AbstractBlock;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockEntityProvider;
@@ -28,6 +27,7 @@ public class CreatorBlock extends Block implements BlockEntityProvider {
         return new CreatorBlockEntity(pos, state);
     }
 
+    // BlockWithEntity defaults to INVISIBLE — override back to MODEL.
     @Override
     public BlockRenderType getRenderType(BlockState state) {
         return BlockRenderType.MODEL;
@@ -49,8 +49,8 @@ public class CreatorBlock extends Block implements BlockEntityProvider {
             World world, BlockState state, BlockEntityType<T> type) {
         if (world.isClient) return null;
         if (type == AlchemodInit.CREATOR_BE_TYPE) {
-            return (BlockEntityTicker<T>) (world1, pos1, state1, blockEntity) ->
-                ((CreatorBlockEntity) blockEntity).serverTick(world1, pos1);
+            return (BlockEntityTicker<T>) (w, pos, s, be) ->
+                    ((CreatorBlockEntity) be).serverTick(w, pos);
         }
         return null;
     }

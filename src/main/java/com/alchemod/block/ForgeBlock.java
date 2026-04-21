@@ -1,7 +1,6 @@
 package com.alchemod.block;
 
 import com.alchemod.AlchemodInit;
-import com.alchemod.block.ForgeBlockEntity;
 import net.minecraft.block.AbstractBlock;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockEntityProvider;
@@ -28,6 +27,7 @@ public class ForgeBlock extends Block implements BlockEntityProvider {
         return new ForgeBlockEntity(pos, state);
     }
 
+    // BlockWithEntity defaults to INVISIBLE — override back to MODEL.
     @Override
     public BlockRenderType getRenderType(BlockState state) {
         return BlockRenderType.MODEL;
@@ -37,6 +37,7 @@ public class ForgeBlock extends Block implements BlockEntityProvider {
     protected ActionResult onUse(BlockState state, World world, BlockPos pos,
             PlayerEntity player, BlockHitResult hit) {
         if (!world.isClient) {
+            // createScreenHandlerFactory now works because BlockWithEntity provides it
             NamedScreenHandlerFactory factory = state.createScreenHandlerFactory(world, pos);
             if (factory != null) player.openHandledScreen(factory);
         }
@@ -49,8 +50,8 @@ public class ForgeBlock extends Block implements BlockEntityProvider {
             World world, BlockState state, BlockEntityType<T> type) {
         if (world.isClient) return null;
         if (type == AlchemodInit.FORGE_BE_TYPE) {
-            return (BlockEntityTicker<T>) (world1, pos1, state1, blockEntity) ->
-                ((ForgeBlockEntity) blockEntity).serverTick(world1, pos1);
+            return (BlockEntityTicker<T>) (w, pos, s, be) ->
+                    ((ForgeBlockEntity) be).serverTick(w, pos);
         }
         return null;
     }

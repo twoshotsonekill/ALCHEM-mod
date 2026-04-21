@@ -26,14 +26,14 @@ public class ForgeScreenHandler extends ScreenHandler {
         this.delegate = delegate;
         inv.onOpen(playerInv.player);
 
-        // Slot A — left input  (centred in the GUI at x=44, y=35)
-        addSlot(new Slot(inv, ForgeBlockEntity.SLOT_A, 44, 35));
+        // Slot positions must align with the slot holes in the furnace.png background:
+        //   Input hole  → (56, 17)  — top-left slot in the furnace texture
+        //   Fuel hole   → (56, 53)  — bottom-left slot (repurposed as second input)
+        //   Output hole → (116, 35) — right slot
 
-        // Slot B — right input  (x=80, y=35)
-        addSlot(new Slot(inv, ForgeBlockEntity.SLOT_B, 80, 35));
-
-        // Output slot — locked to insertion, notifies BE when taken
-        addSlot(new OutputSlot(inv, ForgeBlockEntity.SLOT_OUTPUT, 134, 35));
+        addSlot(new Slot(inv, ForgeBlockEntity.SLOT_A, 56, 17));
+        addSlot(new Slot(inv, ForgeBlockEntity.SLOT_B, 56, 53));
+        addSlot(new OutputSlot(inv, ForgeBlockEntity.SLOT_OUTPUT, 116, 35));
 
         // Player main inventory (3 rows)
         for (int row = 0; row < 3; row++)
@@ -52,11 +52,9 @@ public class ForgeScreenHandler extends ScreenHandler {
         this(syncId, playerInv, new SimpleInventory(3), new ArrayPropertyDelegate(2));
     }
 
-    // ── Expose synced values to the Screen ────────────────────────────────────
-    public int getState()       { return delegate.get(0); }
-    public int getProgress()    { return delegate.get(1); }
+    public int getState()    { return delegate.get(0); }
+    public int getProgress() { return delegate.get(1); }
 
-    // ── Shift-click ───────────────────────────────────────────────────────────
     @Override
     public ItemStack quickMove(PlayerEntity player, int index) {
         ItemStack result = ItemStack.EMPTY;
@@ -65,11 +63,9 @@ public class ForgeScreenHandler extends ScreenHandler {
             ItemStack original = slot.getStack();
             result = original.copy();
             if (index < inv.size()) {
-                // Machine → player
                 if (!insertItem(original, inv.size(), slots.size(), true))
                     return ItemStack.EMPTY;
             } else {
-                // Player → first free input slot
                 if (!insertItem(original, 0, 2, false))
                     return ItemStack.EMPTY;
             }
@@ -82,7 +78,6 @@ public class ForgeScreenHandler extends ScreenHandler {
     @Override
     public boolean canUse(PlayerEntity player) { return inv.canPlayerUse(player); }
 
-    // ── Output slot ───────────────────────────────────────────────────────────
     private static class OutputSlot extends Slot {
         OutputSlot(Inventory inv, int index, int x, int y) { super(inv, index, x, y); }
 

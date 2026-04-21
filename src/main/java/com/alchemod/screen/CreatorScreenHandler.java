@@ -25,17 +25,17 @@ public class CreatorScreenHandler extends ScreenHandler {
         this.delegate = delegate;
         inv.onOpen(playerInv.player);
 
-        // Input A
-        addSlot(new Slot(inv, CreatorBlockEntity.SLOT_A, 44, 35));
-        // Input B
-        addSlot(new Slot(inv, CreatorBlockEntity.SLOT_B, 80, 35));
-        // Output (locked)
-        addSlot(new OutputSlot(inv, CreatorBlockEntity.SLOT_OUTPUT, 134, 35));
+        // Slot positions aligned to furnace.png slot holes (same layout as ForgeScreenHandler)
+        addSlot(new Slot(inv, CreatorBlockEntity.SLOT_A, 56, 17));
+        addSlot(new Slot(inv, CreatorBlockEntity.SLOT_B, 56, 53));
+        addSlot(new OutputSlot(inv, CreatorBlockEntity.SLOT_OUTPUT, 116, 35));
 
         // Player inventory
         for (int row = 0; row < 3; row++)
             for (int col = 0; col < 9; col++)
                 addSlot(new Slot(playerInv, col + row * 9 + 9, 8 + col * 18, 84 + row * 18));
+
+        // Hotbar
         for (int col = 0; col < 9; col++)
             addSlot(new Slot(playerInv, col, 8 + col * 18, 142));
 
