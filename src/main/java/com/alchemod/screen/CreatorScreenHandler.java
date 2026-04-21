@@ -25,7 +25,6 @@ public class CreatorScreenHandler extends ScreenHandler {
         this.delegate = delegate;
         inv.onOpen(playerInv.player);
 
-        // Slot positions aligned to furnace.png slot holes (same layout as ForgeScreenHandler)
         addSlot(new Slot(inv, CreatorBlockEntity.SLOT_A, 56, 17));
         addSlot(new Slot(inv, CreatorBlockEntity.SLOT_B, 56, 53));
         addSlot(new OutputSlot(inv, CreatorBlockEntity.SLOT_OUTPUT, 116, 35));
@@ -64,8 +63,18 @@ public class CreatorScreenHandler extends ScreenHandler {
                 if (!insertItem(original, 0, 2, false))
                     return ItemStack.EMPTY;
             }
-            if (original.isEmpty()) slot.setStack(ItemStack.EMPTY);
-            else slot.markDirty();
+            if (original.isEmpty()) {
+                slot.setStack(ItemStack.EMPTY);
+                // BUG FIX: quickMove bypasses Slot.onTakeItem, so onOutputTaken()
+                // was never called when the player shift-clicked the output slot.
+                // The state stayed permanently stuck at STATE_READY.
+                // Fix: detect the output slot and call the reset callback explicitly.
+                if (index == CreatorBlockEntity.SLOT_OUTPUT && inv instanceof CreatorBlockEntity be) {
+                    be.onOutputTaken();
+                }
+            } else {
+                slot.markDirty();
+            }
         }
         return result;
     }
@@ -77,6 +86,7 @@ public class CreatorScreenHandler extends ScreenHandler {
         @Override public boolean canInsert(ItemStack stack) { return false; }
         @Override
         public void onTakeItem(PlayerEntity player, ItemStack stack) {
+            // Called for regular clicks; quickMove is handled separately above.
             if (inventory instanceof CreatorBlockEntity be) be.onOutputTaken();
             super.onTakeItem(player, stack);
         }

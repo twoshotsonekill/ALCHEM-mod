@@ -52,8 +52,6 @@ public class CreatorBlockEntity extends BlockEntity
     private int state    = STATE_IDLE;
     private int progress = 0;
     private boolean aiPending = false;
-
-    // We also store the last created item's slot so the client screen can show the sprite
     private int lastCreatedSlot = -1;
 
     private final PropertyDelegate delegate = new PropertyDelegate() {
@@ -80,6 +78,7 @@ public class CreatorBlockEntity extends BlockEntity
     }
 
     // ── Server tick ───────────────────────────────────────────────────────────
+
     public void serverTick(World world, BlockPos pos) {
         if (state == STATE_IDLE
                 && !items.get(SLOT_A).isEmpty()
@@ -96,6 +95,7 @@ public class CreatorBlockEntity extends BlockEntity
     }
 
     // ── Start AI creation ─────────────────────────────────────────────────────
+
     private void startCreation(World world) {
         aiPending = true;
         state = STATE_PROCESSING;
@@ -117,11 +117,12 @@ public class CreatorBlockEntity extends BlockEntity
                 });
     }
 
-    // ── OpenRouter call — asks AI to invent a brand-new item ──────────────────
+    // ── OpenRouter call ───────────────────────────────────────────────────────
+
     private CreationResult queryOpenRouter(String itemA, String itemB) {
         String key = AlchemodInit.OPENROUTER_KEY;
         if (key.isBlank()) {
-            return new CreationResult(null, null, "OPENROUTER_API_KEY not set");
+            return CreationResult.error("OPENROUTER_API_KEY not set");
         }
 
         String system = """
@@ -129,19 +130,22 @@ public class CreatorBlockEntity extends BlockEntity
                 Given two input items, invent a new item that feels like a magical synthesis of both.
                 
                 Respond with ONLY valid JSON in this exact format (no markdown, no explanation):
-                {"name":"Item Name","description":"One sentence flavour text describing what it does.","sprite_prompt":"pixel art description for image generation"}
+                {"name":"Item Name","description":"One sentence flavour text.","sprite_prompt":"pixel art description","power":"speed"}
                 
                 Rules:
                 - name: 2-4 words, title case, creative and magical-sounding
                 - description: max 20 words, first-person perspective as if the item speaks
                 - sprite_prompt: 8-15 words describing visual appearance for a 16x16 pixel art sprite
+                - power: EXACTLY one of these strings (choose the one that best fits the item's theme):
+                  speed, strength, regeneration, resistance, fire_resistance, night_vision,
+                  absorption, luck, haste, jump_boost, slow_falling, water_breathing
                 """;
 
         String user = "Create a new item by combining: " + itemA + " + " + itemB;
 
         String body = "{"
                 + "\"model\":\"openai/gpt-4o-mini\","
-                + "\"max_tokens\":120,"
+                + "\"max_tokens\":150,"
                 + "\"messages\":["
                 + "{\"role\":\"system\",\"content\":" + quoted(system) + "},"
                 + "{\"role\":\"user\",\"content\":" + quoted(user) + "}"
@@ -158,41 +162,45 @@ public class CreatorBlockEntity extends BlockEntity
                     .header("Authorization", "Bearer " + key)
                     .header("HTTP-Referer", "https://github.com/alchemod")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .timeout(Duration.ofSeconds(20))
+                    .timeout(Duration.ofSeconds(25))
                     .build();
 
             HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
             AlchemodInit.LOG.info("[Creator] API response: {}", resp.body());
 
             if (resp.statusCode() != 200)
-                return new CreationResult(null, null, "HTTP " + resp.statusCode());
+                return CreationResult.error("HTTP " + resp.statusCode());
 
             return parseCreationResult(resp.body());
 
         } catch (Exception e) {
             AlchemodInit.LOG.error("[Creator] API error", e);
-            return new CreationResult(null, null, e.getMessage());
+            return CreationResult.error(e.getMessage());
         }
     }
 
-    // Extract the three fields from the JSON response
+    // ── Parse AI JSON response ────────────────────────────────────────────────
+
     private CreationResult parseCreationResult(String json) {
-        // Pull content field from OpenRouter wrapper
+        // Pull the content field from OpenRouter's outer JSON wrapper
         Pattern contentPat = Pattern.compile("\"content\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
         Matcher cm = contentPat.matcher(json);
-        String content = cm.find() ? cm.group(1)
-                .replace("\\n", "\n").replace("\\\"", "\"") : json;
+        String content = cm.find()
+                ? cm.group(1).replace("\\n", "\n").replace("\\\"", "\"")
+                : json;
 
-        // Now parse the inner JSON object
         String name   = extractJson(content, "name");
         String desc   = extractJson(content, "description");
         String sprite = extractJson(content, "sprite_prompt");
+        String power  = extractJson(content, "power");
 
-        if (name == null || name.isBlank()) name = "Mysterious Relic";
-        if (desc == null) desc = "An enigmatic object of unknown power.";
-        if (sprite == null) sprite = name + " magical glowing artifact";
+        if (name == null || name.isBlank())   name   = "Mysterious Relic";
+        if (desc == null || desc.isBlank())   desc   = "An enigmatic object of unknown power.";
+        if (sprite == null || sprite.isBlank()) sprite = name + " magical glowing artifact";
+        if (power == null || power.isBlank()) power  = "luck";   // safe fallback
 
-        return new CreationResult(name, sprite, null);
+        AlchemodInit.LOG.info("[Creator] Parsed — name='{}' power='{}' sprite='{}'", name, power, sprite);
+        return new CreationResult(name, desc, sprite, power, null);
     }
 
     private String extractJson(String json, String key) {
@@ -202,6 +210,7 @@ public class CreatorBlockEntity extends BlockEntity
     }
 
     // ── Apply result on server thread ─────────────────────────────────────────
+
     private void applyResult(CreationResult result) {
         aiPending = false;
 
@@ -213,11 +222,7 @@ public class CreatorBlockEntity extends BlockEntity
             return;
         }
 
-        // Claim a dynamic item slot
-        DynamicItemRegistry.CreatedItemMeta meta = new DynamicItemRegistry.CreatedItemMeta(
-                result.name(), "", 0); // slot filled in by claimSlot
-        DynamicItem dynItem = DynamicItemRegistry.claimSlot(meta);
-
+        DynamicItem dynItem = DynamicItemRegistry.claimSlot();
         if (dynItem == null) {
             AlchemodInit.LOG.warn("[Creator] No dynamic slots left!");
             state = STATE_ERROR;
@@ -225,9 +230,13 @@ public class CreatorBlockEntity extends BlockEntity
             return;
         }
 
-        // Update meta with real slot
         int slot = dynItem.getSlotIndex();
-        dynItem.setMeta(new DynamicItemRegistry.CreatedItemMeta(result.name(), "", slot));
+
+        // Build the full metadata record and push it to both the registry and the item
+        DynamicItemRegistry.CreatedItemMeta finalMeta =
+                new DynamicItemRegistry.CreatedItemMeta(
+                        result.name(), result.description(), slot, result.power());
+        DynamicItemRegistry.updateSlotMeta(slot, finalMeta);
 
         // Consume inputs, place output
         items.get(SLOT_A).decrement(1);
@@ -240,14 +249,18 @@ public class CreatorBlockEntity extends BlockEntity
         progress = MAX_PROGRESS;
         state = STATE_READY;
 
-        AlchemodInit.LOG.info("[Creator] Created '{}' in slot {}", result.name(), slot);
+        AlchemodInit.LOG.info("[Creator] Created '{}' (power={}) in slot {}",
+                result.name(), result.power(), slot);
 
-        // Signal client to download the sprite (via NBT sync — sprite prompt stored in item NBT)
+        // Store sprite prompt + power in item NBT so the client can download the sprite
+        // and so the data survives pick-up / world reload
         ItemStack outStack = items.get(SLOT_OUTPUT);
         NbtCompound tag = new NbtCompound();
-        tag.putString("creator_name", result.name());
+        tag.putString("creator_name",   result.name());
+        tag.putString("creator_desc",   result.description());
         tag.putString("creator_sprite", result.spritePrompt());
-        tag.putInt("creator_slot", slot);
+        tag.putString("creator_power",  result.power());
+        tag.putInt("creator_slot",      slot);
         outStack.set(net.minecraft.component.DataComponentTypes.CUSTOM_DATA,
                 net.minecraft.component.type.NbtComponent.of(tag));
 
@@ -262,10 +275,10 @@ public class CreatorBlockEntity extends BlockEntity
 
     public PropertyDelegate getDelegate() { return delegate; }
     public int getMaxProgress() { return MAX_PROGRESS; }
-
     public DefaultedList<ItemStack> getItems() { return items; }
 
     // ── NamedScreenHandlerFactory ─────────────────────────────────────────────
+
     @Override
     public ScreenHandler createMenu(int syncId, PlayerInventory playerInv, PlayerEntity player) {
         return new CreatorScreenHandler(syncId, playerInv, this, delegate);
@@ -277,6 +290,7 @@ public class CreatorBlockEntity extends BlockEntity
     }
 
     // ── Inventory ─────────────────────────────────────────────────────────────
+
     @Override public int size() { return 3; }
     @Override public boolean isEmpty() { return items.stream().allMatch(ItemStack::isEmpty); }
     @Override public ItemStack getStack(int slot) { return items.get(slot); }
@@ -293,6 +307,7 @@ public class CreatorBlockEntity extends BlockEntity
     @Override public void clear() { items.clear(); }
 
     // ── NBT ───────────────────────────────────────────────────────────────────
+
     @Override
     protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
         super.writeNbt(nbt, lookup);
@@ -313,10 +328,21 @@ public class CreatorBlockEntity extends BlockEntity
     }
 
     // ── Util ──────────────────────────────────────────────────────────────────
+
     private static String quoted(String s) {
         return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"")
                 .replace("\n", "\\n").replace("\r", "") + "\"";
     }
 
-    record CreationResult(String name, String spritePrompt, String error) {}
+    /**
+     * Carries all fields from the AI response.
+     * Previously only held (name, spritePrompt, error) — description was extracted
+     * from the AI JSON but then silently dropped. Now all four fields are kept.
+     */
+    record CreationResult(String name, String description, String spritePrompt,
+                          String power, String error) {
+        static CreationResult error(String msg) {
+            return new CreationResult(null, null, null, null, msg);
+        }
+    }
 }

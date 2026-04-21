@@ -26,11 +26,6 @@ public class ForgeScreenHandler extends ScreenHandler {
         this.delegate = delegate;
         inv.onOpen(playerInv.player);
 
-        // Slot positions must align with the slot holes in the furnace.png background:
-        //   Input hole  → (56, 17)  — top-left slot in the furnace texture
-        //   Fuel hole   → (56, 53)  — bottom-left slot (repurposed as second input)
-        //   Output hole → (116, 35) — right slot
-
         addSlot(new Slot(inv, ForgeBlockEntity.SLOT_A, 56, 17));
         addSlot(new Slot(inv, ForgeBlockEntity.SLOT_B, 56, 53));
         addSlot(new OutputSlot(inv, ForgeBlockEntity.SLOT_OUTPUT, 116, 35));
@@ -69,8 +64,18 @@ public class ForgeScreenHandler extends ScreenHandler {
                 if (!insertItem(original, 0, 2, false))
                     return ItemStack.EMPTY;
             }
-            if (original.isEmpty()) slot.setStack(ItemStack.EMPTY);
-            else slot.markDirty();
+            if (original.isEmpty()) {
+                slot.setStack(ItemStack.EMPTY);
+                // BUG FIX: quickMove bypasses Slot.onTakeItem, so onOutputTaken()
+                // was never called when the player shift-clicked the output slot.
+                // The state stayed permanently stuck at STATE_READY.
+                // Fix: detect the output slot and call the reset callback explicitly.
+                if (index == ForgeBlockEntity.SLOT_OUTPUT && inv instanceof ForgeBlockEntity be) {
+                    be.onOutputTaken();
+                }
+            } else {
+                slot.markDirty();
+            }
         }
         return result;
     }
@@ -85,6 +90,7 @@ public class ForgeScreenHandler extends ScreenHandler {
 
         @Override
         public void onTakeItem(PlayerEntity player, ItemStack stack) {
+            // Called for regular clicks; quickMove is handled separately above.
             if (inventory instanceof ForgeBlockEntity be) be.onOutputTaken();
             super.onTakeItem(player, stack);
         }

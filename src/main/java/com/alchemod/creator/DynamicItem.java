@@ -1,13 +1,25 @@
 package com.alchemod.creator;
 
+import net.minecraft.entity.effect.StatusEffectInstance;
+import net.minecraft.entity.effect.StatusEffects;
+import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
-import net.minecraft.item.tooltip.TooltipType;
-import net.minecraft.text.Text;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.entry.RegistryEntry;
+import net.minecraft.sound.SoundCategory;
+import net.minecraft.sound.SoundEvents;
+import net.minecraft.util.ActionResult;
+import net.minecraft.util.Hand;
+import net.minecraft.util.Identifier;
+import net.minecraft.world.World;
 
 import java.util.List;
 
 public class DynamicItem extends Item {
+
+    private static final int EFFECT_DURATION = 600;
+    private static final int USE_COOLDOWN = 200;
 
     private final int slotIndex;
     private DynamicItemRegistry.CreatedItemMeta meta;
@@ -24,24 +36,38 @@ public class DynamicItem extends Item {
     public int getSlotIndex() { return slotIndex; }
 
     @Override
-    public Text getName(ItemStack stack) {
-        if (meta != null) return Text.literal(meta.name());
-        return Text.literal("Unknown Creation");
+    public ActionResult use(World world, PlayerEntity user, Hand hand) {
+        ItemStack stack = user.getStackInHand(hand);
+        if (meta == null || meta.power().isBlank()) {
+            return ActionResult.PASS;
+        }
+        RegistryEntry<net.minecraft.entity.effect.StatusEffect> effect = resolvePower(meta.power());
+        if (effect == null) {
+            return ActionResult.PASS;
+        }
+        if (!world.isClient) {
+            user.addStatusEffect(new StatusEffectInstance(effect, EFFECT_DURATION, 1));
+            world.playSound(null, user.getX(), user.getY(), user.getZ(),
+                    SoundEvents.BLOCK_BEACON_ACTIVATE, SoundCategory.PLAYERS, 0.6f, 1.4f);
+        }
+        return ActionResult.SUCCESS;
     }
 
-    @Override
-    public void appendTooltip(ItemStack stack, TooltipContext context,
-            List<Text> tooltip, TooltipType type) {
-        if (meta != null && !meta.description().isBlank()) {
-            // Wrap description at ~40 chars
-            String desc = meta.description();
-            while (desc.length() > 40) {
-                int cut = desc.lastIndexOf(' ', 40);
-                if (cut < 0) cut = 40;
-                tooltip.add(Text.literal("§7" + desc.substring(0, cut)));
-                desc = desc.substring(cut).trim();
-            }
-            if (!desc.isEmpty()) tooltip.add(Text.literal("§7" + desc));
-        }
+    private static RegistryEntry<net.minecraft.entity.effect.StatusEffect> resolvePower(String power) {
+        return switch (power.toLowerCase().replace("minecraft:", "").trim()) {
+            case "speed" -> StatusEffects.SPEED;
+            case "strength" -> StatusEffects.STRENGTH;
+            case "regeneration" -> StatusEffects.REGENERATION;
+            case "resistance" -> StatusEffects.RESISTANCE;
+            case "fire_resistance" -> StatusEffects.FIRE_RESISTANCE;
+            case "night_vision" -> StatusEffects.NIGHT_VISION;
+            case "absorption" -> StatusEffects.ABSORPTION;
+            case "luck" -> StatusEffects.LUCK;
+            case "haste" -> StatusEffects.HASTE;
+            case "jump_boost" -> StatusEffects.JUMP_BOOST;
+            case "slow_falling" -> StatusEffects.SLOW_FALLING;
+            case "water_breathing" -> StatusEffects.WATER_BREATHING;
+            default -> null;
+        };
     }
 }
