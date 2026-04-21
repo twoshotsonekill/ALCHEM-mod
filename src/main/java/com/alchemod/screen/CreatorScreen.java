@@ -55,7 +55,7 @@ public class CreatorScreen extends HandledScreen<CreatorScreenHandler> {
             drawProcessingEffect(ctx);
         }
 
-        // Progress arrow — same position as furnace arrow (79, 34)
+        // Progress arrow at gui pos (79, 34)
         int fill = switch (state) {
             case CreatorBlockEntity.STATE_READY      -> 24;
             case CreatorBlockEntity.STATE_PROCESSING -> progress * 24 / 100;
@@ -66,7 +66,24 @@ public class CreatorScreen extends HandledScreen<CreatorScreenHandler> {
                     x + 79, y + 34, 176, 14, fill, 16, 256, 256);
         }
 
-        // Status text
+        // Output slot sprite overlay (absolute coords match slot at 116, 35)
+        drawOutputSprite(ctx, state);
+    }
+
+    /**
+     * drawForeground runs AFTER drawBackground and item rendering, in GUI-relative coords.
+     *
+     * Status sits at relative y=71 — the 14-px gap between SLOT_B bottom (y=69)
+     * and player inventory top (y=83).  We suppress the default "Inventory" label
+     * (relative y=72) to avoid overlap.
+     */
+    @Override
+    protected void drawForeground(DrawContext ctx, int mouseX, int mouseY) {
+        // Title
+        ctx.drawText(textRenderer, title, titleX, titleY, 0x404040, false);
+
+        // Status — relative coords
+        int state = handler.getState();
         String status = switch (state) {
             case CreatorBlockEntity.STATE_IDLE       -> "Place two items to create";
             case CreatorBlockEntity.STATE_PROCESSING -> "Inventing\u2026";
@@ -80,12 +97,14 @@ public class CreatorScreen extends HandledScreen<CreatorScreenHandler> {
             case CreatorBlockEntity.STATE_ERROR      -> 0xFF3333;
             default -> 0x888888;
         };
-        int sx = x + (backgroundWidth - textRenderer.getWidth(status)) / 2;
-        ctx.drawText(textRenderer, status, sx, y + 60, col, false);
+        int sx = (backgroundWidth - textRenderer.getWidth(status)) / 2;
+        ctx.drawText(textRenderer, status, sx, 71, col, false);
 
-        // Output slot sprite overlay — matches output slot position (116, 35)
-        drawOutputSprite(ctx, state);
+        // Intentionally NOT calling super to suppress the "Inventory" label at
+        // relative y=72, which would overlap with our status line at y=71.
     }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private void triggerSpriteDownloadIfNeeded() {
         if (handler.slots.size() < 3) return;
@@ -127,7 +146,6 @@ public class CreatorScreen extends HandledScreen<CreatorScreenHandler> {
         if (lastSlot < 0 || !RuntimeTextureManager.isLoaded(lastSlot)) return;
 
         Identifier texId = RuntimeTextureManager.getLoaded(lastSlot);
-        // Draw over the output slot position — matches SLOT_OUTPUT at (116, 35)
         ctx.drawTexture(RenderLayer::getGuiTextured, texId,
                 x + 116, y + 35, 0, 0, 16, 16, 16, 16);
     }

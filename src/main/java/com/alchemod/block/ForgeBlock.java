@@ -27,19 +27,34 @@ public class ForgeBlock extends Block implements BlockEntityProvider {
         return new ForgeBlockEntity(pos, state);
     }
 
-    // BlockWithEntity defaults to INVISIBLE — override back to MODEL.
+    // Block base class returns MODEL already; kept for clarity.
     @Override
     public BlockRenderType getRenderType(BlockState state) {
         return BlockRenderType.MODEL;
+    }
+
+    /**
+     * BUG FIX: Block.createScreenHandlerFactory() returns null by default.
+     * We must override it to return the block entity (which implements
+     * NamedScreenHandlerFactory). Without this, state.createScreenHandlerFactory()
+     * always returns null and the GUI never opens.
+     */
+    @Override
+    public NamedScreenHandlerFactory createScreenHandlerFactory(BlockState state, World world, BlockPos pos) {
+        BlockEntity be = world.getBlockEntity(pos);
+        return be instanceof NamedScreenHandlerFactory nsf ? nsf : null;
     }
 
     @Override
     protected ActionResult onUse(BlockState state, World world, BlockPos pos,
             PlayerEntity player, BlockHitResult hit) {
         if (!world.isClient) {
-            // createScreenHandlerFactory now works because BlockWithEntity provides it
-            NamedScreenHandlerFactory factory = state.createScreenHandlerFactory(world, pos);
-            if (factory != null) player.openHandledScreen(factory);
+            // Directly grab the block entity — avoids relying on Block.createScreenHandlerFactory
+            // which returns null in the base class and would silently swallow the open call.
+            BlockEntity be = world.getBlockEntity(pos);
+            if (be instanceof NamedScreenHandlerFactory factory) {
+                player.openHandledScreen(factory);
+            }
         }
         return ActionResult.SUCCESS;
     }

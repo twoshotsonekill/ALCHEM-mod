@@ -34,20 +34,34 @@ public class ForgeScreen extends HandledScreen<ForgeScreenHandler> {
         int state    = handler.getState();
         int progress = handler.getProgress();
 
-        // Progress arrow — furnace sprite at u=176, v=14, 24×16 px
-        // Sits between the input slot (56,17) and output slot (116,35) at gui pos (79,34)
-        int maxProg   = 80;
+        // Progress arrow — furnace sprite at u=176, v=14, 24×16 px, at gui pos (79, 34)
         int arrowFill = switch (state) {
             case ForgeBlockEntity.STATE_READY      -> 24;
-            case ForgeBlockEntity.STATE_PROCESSING -> progress * 24 / maxProg;
+            case ForgeBlockEntity.STATE_PROCESSING -> progress * 24 / 80;
             default -> 0;
         };
         if (arrowFill > 0) {
             ctx.drawTexture(RenderLayer::getGuiTextured, BG,
                     x + 79, y + 34, 176, 14, arrowFill, 16, 256, 256);
         }
+    }
 
-        // Status line below the GUI
+    /**
+     * drawForeground runs AFTER drawBackground and item rendering, using GUI-relative
+     * coordinates (origin already translated to (x, y)).
+     *
+     * We draw only the title and our status line here.
+     * The status sits at relative y=71 — safely in the 14-px gap between the bottom
+     * of SLOT_B (relative y=53+16=69) and the top of the player inventory (relative y=83).
+     * We suppress the default "Inventory" label (relative y=72) so it does not overlap.
+     */
+    @Override
+    protected void drawForeground(DrawContext ctx, int mouseX, int mouseY) {
+        // Title
+        ctx.drawText(textRenderer, title, titleX, titleY, 0x404040, false);
+
+        // Status — relative coords (GUI origin already translated)
+        int state = handler.getState();
         String status = switch (state) {
             case ForgeBlockEntity.STATE_IDLE       -> "Place two items to combine";
             case ForgeBlockEntity.STATE_PROCESSING -> "Combining\u2026";
@@ -61,8 +75,12 @@ public class ForgeScreen extends HandledScreen<ForgeScreenHandler> {
             case ForgeBlockEntity.STATE_ERROR      -> 0xCC2222;
             default -> 0x666666;
         };
-        int sx = x + (backgroundWidth - textRenderer.getWidth(status)) / 2;
-        ctx.drawText(textRenderer, status, sx, y + 60, col, false);
+        int sx = (backgroundWidth - textRenderer.getWidth(status)) / 2;
+        ctx.drawText(textRenderer, status, sx, 71, col, false);
+
+        // Intentionally NOT calling super — that would draw the "Inventory" label at
+        // relative y=72, which collides with our status line at y=71.
+        // Player inventory label is omitted; the contents make it self-evident.
     }
 
     @Override
