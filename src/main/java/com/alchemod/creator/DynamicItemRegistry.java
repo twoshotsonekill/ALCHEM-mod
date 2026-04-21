@@ -4,6 +4,8 @@ import com.alchemod.AlchemodInit;
 import net.minecraft.item.Item;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.Registry;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
 import net.minecraft.util.Identifier;
 
 import java.util.ArrayList;
@@ -31,7 +33,11 @@ public class DynamicItemRegistry {
     public static void register() {
         for (int i = 0; i < POOL_SIZE; i++) {
             Identifier id = Identifier.of(AlchemodInit.MOD_ID, "dynamic_item_" + i);
-            DynamicItem item = new DynamicItem(new Item.Settings().maxCount(64), i);
+            DynamicItem item = new DynamicItem(
+                    new Item.Settings()
+                            .maxCount(64)
+                            .registryKey(RegistryKey.of(RegistryKeys.ITEM, id)),
+                    i);
             Registry.register(Registries.ITEM, id, item);
             POOL.add(item);
         }
