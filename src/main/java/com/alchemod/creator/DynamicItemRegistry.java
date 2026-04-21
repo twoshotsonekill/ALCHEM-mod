@@ -16,17 +16,15 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Pre-registers a pool of "dynamic item" slots at startup.
  * Each slot starts as a blank item; when the Creator Forge produces one,
- * we assign it a name, description, power, and texture at runtime.
+ * we assign it name / description / rarity / effects / special at runtime.
  *
  * Pool size = 64 unique created items per game session.
  */
 public class DynamicItemRegistry {
 
     public static final int POOL_SIZE = 64;
-    private static final List<DynamicItem> POOL = new ArrayList<>();
-
-    // Maps slot index → metadata about the created item
-    private static final Map<Integer, CreatedItemMeta> META = new ConcurrentHashMap<>();
+    private static final List<DynamicItem>              POOL = new ArrayList<>();
+    private static final Map<Integer, CreatedItemMeta>  META = new ConcurrentHashMap<>();
 
     private static int nextSlot = 0;
 
@@ -44,10 +42,6 @@ public class DynamicItemRegistry {
         AlchemodInit.LOG.info("[Creator] Registered {} dynamic item slots.", POOL_SIZE);
     }
 
-    /**
-     * Claim the next available slot. Returns null if pool exhausted.
-     * Call updateSlotMeta() afterwards to assign the final metadata.
-     */
     public static synchronized DynamicItem claimSlot() {
         if (nextSlot >= POOL_SIZE) {
             AlchemodInit.LOG.warn("[Creator] Dynamic item pool exhausted!");
@@ -58,7 +52,6 @@ public class DynamicItemRegistry {
         return POOL.get(slot);
     }
 
-    /** Set (or replace) the metadata for a slot and push it to the item instance. */
     public static void updateSlotMeta(int slot, CreatedItemMeta meta) {
         META.put(slot, meta);
         DynamicItem item = POOL.get(slot);
@@ -73,19 +66,74 @@ public class DynamicItemRegistry {
         return META.get(slot);
     }
 
-    /**
-     * Metadata for a created item.
-     *
-     * @param name        Display name (e.g. "Ember Shard")
-     * @param description Flavour text shown in tooltip
-     * @param slot        Dynamic item slot index (0–63)
-     * @param power       One of the supported vanilla effect IDs, e.g. "speed"
-     */
-    public record CreatedItemMeta(String name, String description, int slot, String power) {
+    // ─────────────────────────────────────────────────────────────────────────
+    // Meta record
+    // ─────────────────────────────────────────────────────────────────────────
 
-        /** Human-readable label for the power, used in tooltip. */
-        public String powerLabel() {
-            return switch (power.toLowerCase().replace("minecraft:", "").trim()) {
+    /**
+     * Full metadata for one created item.
+     *
+     * @param name         Display name  — e.g. "Ember Crown"
+     * @param description  Flavour text  — one sentence
+     * @param slot         Dynamic item slot index (0–63)
+     * @param rarity       One of: common | uncommon | rare | epic | legendary
+     * @param effects      Ordered list of vanilla effect IDs assigned by the AI.
+     *                     Length scales with rarity (1 → 4).
+     * @param special      Optional special-ability ID; may be null for low rarities.
+     *                     One of: ignite | knockback | heal_aura | launch |
+     *                             freeze | drain | phase | lightning | void_step
+     */
+    public record CreatedItemMeta(
+            String       name,
+            String       description,
+            int          slot,
+            String       rarity,
+            List<String> effects,
+            String       special
+    ) {
+        /** Charge count used when the item predates the rarity system. */
+        public static final int DEFAULT_CHARGES_FALLBACK = 3;
+
+        // ── Rarity helpers ────────────────────────────────────────────────────
+
+        /** § colour code for the item name. */
+        public String rarityColour() {
+            return switch (rarity().toLowerCase()) {
+                case "uncommon"  -> "§a"; // green
+                case "rare"      -> "§b"; // aqua
+                case "epic"      -> "§d"; // light purple
+                case "legendary" -> "§6"; // gold
+                default          -> "§f"; // white (common)
+            };
+        }
+
+        /** Formatted rarity label for the tooltip. */
+        public String rarityLabel() {
+            return switch (rarity().toLowerCase()) {
+                case "uncommon"  -> "§aUncommon";
+                case "rare"      -> "§bRare";
+                case "epic"      -> "§dEpic";
+                case "legendary" -> "§6§lLegendary";
+                default          -> "§7Common";
+            };
+        }
+
+        /** Number of charges the item spawns with (scales with rarity). */
+        public int startingCharges() {
+            return switch (rarity().toLowerCase()) {
+                case "uncommon"  -> 5;
+                case "rare"      -> 6;
+                case "epic"      -> 7;
+                case "legendary" -> 10;
+                default          -> 3; // common
+            };
+        }
+
+        // ── Effect label helpers ───────────────────────────────────────────────
+
+        /** Formatted label for a single effect ID. */
+        public static String effectLabel(String effect) {
+            return switch (effect.toLowerCase().replace("minecraft:", "").trim()) {
                 case "speed"           -> "§9Speed";
                 case "strength"        -> "§4Strength";
                 case "regeneration"    -> "§cRegeneration";
@@ -98,7 +146,24 @@ public class DynamicItemRegistry {
                 case "jump_boost"      -> "§aJump Boost";
                 case "slow_falling"    -> "§fSlow Falling";
                 case "water_breathing" -> "§3Water Breathing";
-                default -> "§7Unknown";
+                default -> "§7" + effect;
+            };
+        }
+
+        /** Formatted label for the special ability. */
+        public String specialLabel() {
+            if (special() == null || special().isBlank()) return null;
+            return switch (special().toLowerCase()) {
+                case "ignite"    -> "§c🔥 Ignite";
+                case "knockback" -> "§7💥 Knockback";
+                case "heal_aura" -> "§a❤ Heal Aura";
+                case "launch"    -> "§e🚀 Launch";
+                case "freeze"    -> "§b❄ Freeze";
+                case "drain"     -> "§5⚡ Drain";
+                case "phase"     -> "§d👁 Phase";
+                case "lightning" -> "§e⚡ Lightning";
+                case "void_step" -> "§8✦ Void Step";
+                default -> "§7" + special();
             };
         }
     }
