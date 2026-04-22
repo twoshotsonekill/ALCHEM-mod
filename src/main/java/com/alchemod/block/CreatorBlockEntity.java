@@ -28,7 +28,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -49,44 +48,46 @@ public class CreatorBlockEntity extends BlockEntity
 
     private static final int MAX_PROGRESS = 100;
 
-    // Valid effect IDs the AI may assign
+    // ── Allowed values ────────────────────────────────────────────────────────
+
     private static final Set<String> VALID_EFFECTS = Set.of(
             "speed", "strength", "regeneration", "resistance",
             "fire_resistance", "night_vision", "absorption", "luck",
             "haste", "jump_boost", "slow_falling", "water_breathing");
 
-    // Valid special ability IDs
     private static final Set<String> VALID_SPECIALS = Set.of(
             "ignite", "knockback", "heal_aura", "launch",
             "freeze", "drain", "phase", "lightning", "void_step");
 
-    // Valid rarity values
     private static final Set<String> VALID_RARITIES = Set.of(
             "common", "uncommon", "rare", "epic", "legendary");
+
+    private static final Set<String> VALID_ITEM_TYPES = Set.of(
+            "use_item", "bow", "spawn_egg", "food", "sword", "totem", "throwable");
+
+    /** Mob IDs that can be safely spawned and modified at runtime. */
+    private static final Set<String> VALID_MOBS = Set.of(
+            "zombie", "skeleton", "creeper", "spider", "enderman", "blaze", "witch",
+            "phantom", "slime", "magma_cube", "hoglin", "strider",
+            "cow", "pig", "sheep", "chicken", "bat", "wolf",
+            "rabbit", "fox", "bee", "axolotl", "parrot");
+
+    // ── State ─────────────────────────────────────────────────────────────────
 
     private final DefaultedList<ItemStack> items =
             DefaultedList.ofSize(3, ItemStack.EMPTY);
 
-    private int state    = STATE_IDLE;
-    private int progress = 0;
-    private boolean aiPending = false;
-    private int lastCreatedSlot = -1;
+    private int     state           = STATE_IDLE;
+    private int     progress        = 0;
+    private boolean aiPending       = false;
+    private int     lastCreatedSlot = -1;
 
     private final PropertyDelegate delegate = new PropertyDelegate() {
         @Override public int get(int i) {
-            return switch (i) {
-                case 0 -> state;
-                case 1 -> progress;
-                case 2 -> lastCreatedSlot;
-                default -> 0;
-            };
+            return switch (i) { case 0 -> state; case 1 -> progress; case 2 -> lastCreatedSlot; default -> 0; };
         }
         @Override public void set(int i, int v) {
-            switch (i) {
-                case 0 -> state = v;
-                case 1 -> progress = v;
-                case 2 -> lastCreatedSlot = v;
-            }
+            switch (i) { case 0 -> state = v; case 1 -> progress = v; case 2 -> lastCreatedSlot = v; }
         }
         @Override public int size() { return 3; }
     };
@@ -115,8 +116,8 @@ public class CreatorBlockEntity extends BlockEntity
 
     private void startCreation(World world) {
         aiPending = true;
-        state = STATE_PROCESSING;
-        progress = 0;
+        state     = STATE_PROCESSING;
+        progress  = 0;
         markDirty();
 
         String itemA = items.get(SLOT_A).getName().getString()
@@ -138,53 +139,79 @@ public class CreatorBlockEntity extends BlockEntity
 
     private CreationResult queryOpenRouter(String itemA, String itemB) {
         String key = AlchemodInit.OPENROUTER_KEY;
-        if (key.isBlank()) {
-            return CreationResult.error("OPENROUTER_API_KEY not set");
-        }
+        if (key.isBlank()) return CreationResult.error("OPENROUTER_API_KEY not set");
 
         String system = """
-You are an alchemist inventing entirely NEW magical items that don't exist in Minecraft.
-Given two input items, invent a new magical item that is a synthesis of both.
+You are a creative Minecraft alchemist inventing wildly imaginative NEW items.
+Given two input items, invent a magical synthesis that could be any kind of item.
 
-The rarity reflects how thematically interesting or powerful the combination is:
-- common: mundane pairings (stone + dirt, two similar items)
-- uncommon: mildly interesting pairings (wood + iron)
-- rare: interesting thematic match (fire + water, opposites or lore-rich items)
-- epic: creative or powerful pairings (dragon egg + beacon, legendary items)
-- legendary: extraordinary universe-altering combinations (end crystal + nether star, etc.)
+=== ITEM TYPES ===
+Choose item_type based purely on what the combination SUGGESTS. Be creative!
 
+  use_item   – instant right-click ability (potions, wands, orbs)
+  bow        – hold to charge, fire a magical projectile
+               → Use when inputs include: bow, arrow, crossbow, string, feather, blaze rod
+  spawn_egg  – summons a magical creature when right-clicked on ground
+               → Use when inputs include: any spawn egg, mob drops (bone, slimeball, spider eye,
+                 feather, leather, wool), monster-related items, seeds/crops + mob items
+  food       – hold right-click to eat and gain powerful effects
+               → Use when inputs include: any food, apple, bread, melon, carrot, fish, cake
+  sword      – right-click to sweep nearby enemies with magical damage
+               → Use when inputs include: sword, axe, trident, combat items
+  totem      – hold in off-hand for persistent passive effects on you and nearby allies
+               → Use when inputs include: totem, shield, armor, pearl, beacon, conduit
+  throwable  – throw at a target point for area explosion/effects
+               → Use when inputs include: snowball, egg, ender pearl, fireball, bomb-like items
+
+=== RARITY GUIDE ===
+  common    – mundane pairing, one weak effect
+  uncommon  – mildly interesting, two effects
+  rare      – creative/thematic match, good effects + special ability
+  epic      – powerful/lore-rich combination, multiple effects + strong special
+  legendary – world-altering or iconic combination, maximum effects + overpowered special
+
+=== VALID EFFECTS (use exact strings) ===
+speed, strength, regeneration, resistance, fire_resistance, night_vision,
+absorption, luck, haste, jump_boost, slow_falling, water_breathing
+
+Effects count by rarity: common=1, uncommon=2, rare=2, epic=3, legendary=4
+
+=== VALID SPECIALS ===
+ignite, knockback, heal_aura, launch, freeze, drain, phase, lightning, void_step
+Required for rare/epic/legendary. Set to null for common. Optional for uncommon.
+
+=== VALID MOBS (spawn_egg only) ===
+zombie, skeleton, creeper, spider, enderman, blaze, witch,
+phantom, slime, magma_cube, bat, cow, pig, sheep, chicken,
+wolf, rabbit, fox, bee, axolotl, parrot
+
+=== OUTPUT FORMAT ===
 Respond with ONLY valid JSON, no markdown, no explanation:
-{"name":"Item Name","description":"One sentence flavour.","sprite_prompt":"pixel art description","rarity":"rare","effects":["strength","haste"],"special":"knockback"}
+{"name":"Item Name","description":"One sentence flavour.","sprite_prompt":"pixel art description 8-15 words","rarity":"rare","item_type":"bow","effects":["strength","haste"],"special":"ignite","mob_type":null}
 
-STRICT rules:
-- name: 2-4 words, title case, creative and magical
-- description: max 20 words
-- sprite_prompt: 8-15 words describing visual appearance for 16x16 pixel art
-- rarity: exactly ONE of: common, uncommon, rare, epic, legendary
-- effects: JSON array of strings from this EXACT list (case-sensitive):
-    speed, strength, regeneration, resistance, fire_resistance, night_vision,
-    absorption, luck, haste, jump_boost, slow_falling, water_breathing
-  Array length by rarity: common=1, uncommon=2, rare=2, epic=3, legendary=4
-- special: exactly ONE of the following strings, or null for common and optionally uncommon:
-    ignite, knockback, heal_aura, launch, freeze, drain, phase, lightning, void_step
-  Required for rare, epic, legendary. Use null (not the string "null") for common.
+mob_type: for spawn_egg ONLY — a string from the mob list above. null for everything else.
+
+CREATIVE EXAMPLES:
+- Bow + Blaze Rod → {"name":"Inferno Bow","item_type":"bow","special":"ignite","rarity":"rare",...}
+- Melon + Phantom Membrane → {"name":"Flying Melon Egg","item_type":"spawn_egg","mob_type":"phantom","special":"launch","rarity":"uncommon",...}
+- Golden Apple + Nether Star → {"name":"Divine Fruit","item_type":"food","special":"heal_aura","rarity":"legendary",...}
+- Ender Pearl + Snowball → {"name":"Freeze Pearl","item_type":"throwable","special":"freeze","rarity":"rare",...}
+- Diamond Sword + Fire Charge → {"name":"Blazing Blade","item_type":"sword","special":"ignite","rarity":"epic",...}
+- Totem of Undying + Emerald → {"name":"Eternal Emerald","item_type":"totem","special":"heal_aura","rarity":"epic",...}
 """;
 
         String user = "Create a new item by combining: " + itemA + " + " + itemB;
 
         String body = "{"
                 + "\"model\":\"openai/gpt-4o-mini\","
-                + "\"max_tokens\":200,"
+                + "\"max_tokens\":220,"
                 + "\"messages\":["
                 + "{\"role\":\"system\",\"content\":" + quoted(system) + "},"
                 + "{\"role\":\"user\",\"content\":" + quoted(user) + "}"
                 + "]}";
 
         try {
-            HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(10))
-                    .build();
-
+            HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create("https://openrouter.ai/api/v1/chat/completions"))
                     .header("Content-Type", "application/json")
@@ -197,8 +224,7 @@ STRICT rules:
             HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
             AlchemodInit.LOG.info("[Creator] API response: {}", resp.body());
 
-            if (resp.statusCode() != 200)
-                return CreationResult.error("HTTP " + resp.statusCode());
+            if (resp.statusCode() != 200) return CreationResult.error("HTTP " + resp.statusCode());
 
             return parseCreationResult(resp.body());
 
@@ -211,103 +237,154 @@ STRICT rules:
     // ── Parse AI JSON response ────────────────────────────────────────────────
 
     private CreationResult parseCreationResult(String json) {
-        // Unwrap OpenRouter's outer JSON to get the model's content string
+        // Unwrap OpenRouter outer envelope
         Pattern contentPat = Pattern.compile("\"content\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
         Matcher cm = contentPat.matcher(json);
         String content = cm.find()
                 ? cm.group(1).replace("\\n", "\n").replace("\\\"", "\"").replace("\\/", "/")
                 : json;
 
-        String       name    = extractJsonString(content, "name");
-        String       desc    = extractJsonString(content, "description");
-        String       sprite  = extractJsonString(content, "sprite_prompt");
-        String       rarity  = extractJsonString(content, "rarity");
-        List<String> effects = extractJsonArray (content, "effects");
-        String       special = extractJsonStringNullable(content, "special");
+        String       name     = extractStr(content, "name");
+        String       desc     = extractStr(content, "description");
+        String       sprite   = extractStr(content, "sprite_prompt");
+        String       rarity   = extractStr(content, "rarity");
+        String       itemType = extractStr(content, "item_type");
+        List<String> effects  = extractArray(content, "effects");
+        String       special  = extractStrNullable(content, "special");
+        String       mobType  = extractStrNullable(content, "mob_type");
 
-        // ── Sanitise / fallback ───────────────────────────────────────────────
+        // ── Defaults ─────────────────────────────────────────────────────────
 
-        if (name == null   || name.isBlank())   name   = "Mysterious Relic";
-        if (desc == null   || desc.isBlank())   desc   = "An enigmatic object of unknown power.";
-        if (sprite == null || sprite.isBlank()) sprite = name + " magical glowing artifact";
+        if (isBlank(name))     name     = "Mysterious Relic";
+        if (isBlank(desc))     desc     = "An enigmatic object of unknown power.";
+        if (isBlank(sprite))   sprite   = name + " magical glowing artifact";
 
-        // Rarity: default common if unrecognised
-        rarity = (rarity != null && VALID_RARITIES.contains(rarity.toLowerCase()))
-                ? rarity.toLowerCase() : "common";
+        rarity   = VALID_RARITIES.contains(normalise(rarity))   ? normalise(rarity)   : "common";
+        itemType = VALID_ITEM_TYPES.contains(normalise(itemType)) ? normalise(itemType) : "use_item";
 
-        // Filter effects to only known IDs; guarantee at least one
-        List<String> cleanEffects = new ArrayList<>();
-        for (String e : effects) {
-            String norm = e.toLowerCase().replace("minecraft:", "").trim();
-            if (VALID_EFFECTS.contains(norm)) cleanEffects.add(norm);
-        }
-        if (cleanEffects.isEmpty()) cleanEffects.add("luck");
+        // Validate effects
+        List<String> cleanEffects = effects.stream()
+                .map(this::normalise)
+                .filter(VALID_EFFECTS::contains)
+                .toList();
+        if (cleanEffects.isEmpty()) cleanEffects = List.of("luck");
 
-        // Cap effect count to rarity maximum (just in case the model over-generates)
-        int maxEffects = switch (rarity) {
-            case "uncommon"  -> 2;
-            case "rare"      -> 2;
-            case "epic"      -> 3;
-            case "legendary" -> 4;
-            default          -> 1;
-        };
-        if (cleanEffects.size() > maxEffects) {
-            cleanEffects = cleanEffects.subList(0, maxEffects);
-        }
+        // Cap effects to rarity max
+        int maxEff = switch (rarity) { case "uncommon", "rare" -> 2; case "epic" -> 3; case "legendary" -> 4; default -> 1; };
+        if (cleanEffects.size() > maxEff) cleanEffects = cleanEffects.subList(0, maxEff);
 
-        // Special: validate or nullify
+        // Validate special
         if (special != null) {
-            special = special.toLowerCase().replace("minecraft:", "").trim();
+            special = normalise(special);
             if (!VALID_SPECIALS.contains(special)) special = null;
         }
-        // Ensure rare+ always have a special; assign one based on primary effect if missing
-        if (special == null && (rarity.equals("rare") || rarity.equals("epic") || rarity.equals("legendary"))) {
+        // Guarantee rare+ have a special
+        if (special == null && Set.of("rare", "epic", "legendary").contains(rarity)) {
             special = fallbackSpecial(cleanEffects.get(0));
         }
 
-        AlchemodInit.LOG.info("[Creator] Parsed — name='{}' rarity='{}' effects={} special='{}'",
-                name, rarity, cleanEffects, special);
+        // Validate mob_type — only meaningful for spawn_egg
+        if (!"spawn_egg".equals(itemType)) {
+            mobType = null;
+        } else {
+            if (mobType != null) mobType = normalise(mobType);
+            if (!VALID_MOBS.contains(mobType)) mobType = "bat"; // safe default
+        }
 
-        return new CreationResult(name, desc, sprite, rarity, cleanEffects, special, null);
+        AlchemodInit.LOG.info("[Creator] Parsed — '{}' type={} rarity={} effects={} special={} mob={}",
+                name, itemType, rarity, cleanEffects, special, mobType);
+
+        return new CreationResult(name, desc, sprite, rarity, itemType, cleanEffects, special, mobType, null);
     }
 
-    /** Regex-extract a JSON string value, returning null if absent. */
-    private String extractJsonString(String json, String key) {
-        Pattern p = Pattern.compile("\"" + key + "\"\\s*:\\s*\"([^\"]+)\"");
-        Matcher m = p.matcher(json);
+    // ── Apply result on server thread ─────────────────────────────────────────
+
+    private void applyResult(CreationResult r) {
+        aiPending = false;
+
+        if (r.error() != null) {
+            AlchemodInit.LOG.warn("[Creator] Error: {}", r.error());
+            state = STATE_ERROR; progress = 0; markDirty(); return;
+        }
+
+        DynamicItem dynItem = DynamicItemRegistry.claimSlot();
+        if (dynItem == null) {
+            AlchemodInit.LOG.warn("[Creator] No dynamic slots left!");
+            state = STATE_ERROR; markDirty(); return;
+        }
+
+        int slot = dynItem.getSlotIndex();
+        DynamicItemRegistry.CreatedItemMeta meta =
+                new DynamicItemRegistry.CreatedItemMeta(
+                        r.name(), r.description(), slot, r.rarity(),
+                        r.itemType(), r.effects(), r.special(), r.mobType());
+        DynamicItemRegistry.updateSlotMeta(slot, meta);
+
+        // Consume inputs
+        items.get(SLOT_A).decrement(1); items.get(SLOT_B).decrement(1);
+        if (items.get(SLOT_A).isEmpty()) items.set(SLOT_A, ItemStack.EMPTY);
+        if (items.get(SLOT_B).isEmpty()) items.set(SLOT_B, ItemStack.EMPTY);
+
+        // Build output stack with full NBT
+        ItemStack out = new ItemStack(dynItem);
+        NbtCompound tag = new NbtCompound();
+        tag.putString("creator_name",      r.name());
+        tag.putString("creator_desc",      r.description());
+        tag.putString("creator_sprite",    r.spritePrompt());
+        tag.putString("creator_rarity",    r.rarity());
+        tag.putString("creator_item_type", r.itemType());
+        tag.putString("creator_effects",   String.join(",", r.effects()));
+        tag.putString("creator_special",   r.special() != null ? r.special() : "");
+        tag.putString("creator_mob_type",  r.mobType() != null ? r.mobType() : "");
+        tag.putInt   ("creator_slot",      slot);
+        tag.putInt   ("charges",           meta.startingCharges());
+        out.set(net.minecraft.component.DataComponentTypes.CUSTOM_DATA,
+                net.minecraft.component.type.NbtComponent.of(tag));
+
+        items.set(SLOT_OUTPUT, out);
+        lastCreatedSlot = slot;
+        progress = MAX_PROGRESS;
+        state    = STATE_READY;
+        AlchemodInit.LOG.info("[Creator] Created '{}' (type={} rarity={}) slot {}",
+                r.name(), r.itemType(), r.rarity(), slot);
+        markDirty();
+    }
+
+    public void onOutputTaken() { state = STATE_IDLE; progress = 0; markDirty(); }
+
+    // ── Parsing helpers ───────────────────────────────────────────────────────
+
+    private String extractStr(String json, String key) {
+        Matcher m = Pattern.compile("\"" + key + "\"\\s*:\\s*\"([^\"]+)\"").matcher(json);
         return m.find() ? m.group(1).trim() : null;
     }
 
-    /**
-     * Like {@link #extractJsonString} but also handles a bare {@code null} value,
-     * returning Java {@code null} in that case.
-     */
-    private String extractJsonStringNullable(String json, String key) {
-        // Check for JSON null first
-        Pattern nullP = Pattern.compile("\"" + key + "\"\\s*:\\s*null");
-        if (nullP.matcher(json).find()) return null;
-        return extractJsonString(json, key);
+    private String extractStrNullable(String json, String key) {
+        if (Pattern.compile("\"" + key + "\"\\s*:\\s*null").matcher(json).find()) return null;
+        return extractStr(json, key);
     }
 
-    /** Regex-extract a JSON array of strings. */
-    private List<String> extractJsonArray(String json, String key) {
+    private List<String> extractArray(String json, String key) {
         List<String> result = new ArrayList<>();
         try {
-            Pattern ap = Pattern.compile("\"" + key + "\"\\s*:\\s*\\[([^\\]]*?)\\]");
-            Matcher am = ap.matcher(json);
+            Matcher am = Pattern.compile("\"" + key + "\"\\s*:\\s*\\[([^\\]]*?)]").matcher(json);
             if (!am.find()) return result;
-            Pattern ip = Pattern.compile("\"([^\"]+)\"");
-            Matcher im = ip.matcher(am.group(1));
+            Matcher im = Pattern.compile("\"([^\"]+)\"").matcher(am.group(1));
             while (im.find()) result.add(im.group(1).trim());
         } catch (Exception e) {
-            AlchemodInit.LOG.warn("[Creator] Array parse error for key '{}': {}", key, e.getMessage());
+            AlchemodInit.LOG.warn("[Creator] Array parse error for '{}': {}", key, e.getMessage());
         }
         return result;
     }
 
-    /** Pick a sensible special ability when the AI omitted one for a rare+ item. */
-    private static String fallbackSpecial(String primaryEffect) {
-        return switch (primaryEffect) {
+    private String normalise(String s) {
+        return s == null ? "" : s.toLowerCase().replace("minecraft:", "").trim();
+    }
+
+    private boolean isBlank(String s) { return s == null || s.isBlank(); }
+
+    private static String fallbackSpecial(String effect) {
+        return switch (effect) {
             case "strength"        -> "knockback";
             case "speed"           -> "void_step";
             case "regeneration"    -> "heal_aura";
@@ -320,156 +397,64 @@ STRICT rules:
         };
     }
 
-    // ── Apply result on server thread ─────────────────────────────────────────
+    // ── Accessors ─────────────────────────────────────────────────────────────
 
-    private void applyResult(CreationResult result) {
-        aiPending = false;
-
-        if (result.error() != null) {
-            AlchemodInit.LOG.warn("[Creator] Error: {}", result.error());
-            state = STATE_ERROR;
-            progress = 0;
-            markDirty();
-            return;
-        }
-
-        DynamicItem dynItem = DynamicItemRegistry.claimSlot();
-        if (dynItem == null) {
-            AlchemodInit.LOG.warn("[Creator] No dynamic slots left!");
-            state = STATE_ERROR;
-            markDirty();
-            return;
-        }
-
-        int slot = dynItem.getSlotIndex();
-
-        DynamicItemRegistry.CreatedItemMeta meta =
-                new DynamicItemRegistry.CreatedItemMeta(
-                        result.name(),
-                        result.description(),
-                        slot,
-                        result.rarity(),
-                        result.effects(),
-                        result.special());
-
-        DynamicItemRegistry.updateSlotMeta(slot, meta);
-
-        // Consume inputs
-        items.get(SLOT_A).decrement(1);
-        items.get(SLOT_B).decrement(1);
-        if (items.get(SLOT_A).isEmpty()) items.set(SLOT_A, ItemStack.EMPTY);
-        if (items.get(SLOT_B).isEmpty()) items.set(SLOT_B, ItemStack.EMPTY);
-
-        ItemStack outStack = new ItemStack(dynItem);
-
-        // Persist all meta into CUSTOM_DATA so the client can read it from the
-        // item's NBT even before DynamicItemRegistry is populated client-side
-        NbtCompound tag = new NbtCompound();
-        tag.putString("creator_name",    result.name());
-        tag.putString("creator_desc",    result.description());
-        tag.putString("creator_sprite",  result.spritePrompt());
-        tag.putString("creator_rarity",  result.rarity());
-        // Effects stored as comma-separated for easy re-parsing
-        tag.putString("creator_effects", String.join(",", result.effects()));
-        tag.putString("creator_special", result.special() != null ? result.special() : "");
-        tag.putInt   ("creator_slot",    slot);
-        // Initialise charges based on rarity
-        tag.putInt   ("charges",         meta.startingCharges());
-        outStack.set(net.minecraft.component.DataComponentTypes.CUSTOM_DATA,
-                net.minecraft.component.type.NbtComponent.of(tag));
-
-        items.set(SLOT_OUTPUT, outStack);
-        lastCreatedSlot = slot;
-        progress = MAX_PROGRESS;
-        state = STATE_READY;
-
-        AlchemodInit.LOG.info("[Creator] Created '{}' (rarity={} effects={} special={}) in slot {}",
-                result.name(), result.rarity(), result.effects(), result.special(), slot);
-        markDirty();
-    }
-
-    public void onOutputTaken() {
-        state = STATE_IDLE;
-        progress = 0;
-        markDirty();
-    }
-
-    public PropertyDelegate getDelegate()  { return delegate; }
-    public int getMaxProgress()            { return MAX_PROGRESS; }
-    public DefaultedList<ItemStack> getItems() { return items; }
+    public PropertyDelegate getDelegate()            { return delegate; }
+    public int getMaxProgress()                      { return MAX_PROGRESS; }
+    public DefaultedList<ItemStack> getItems()       { return items; }
 
     // ── NamedScreenHandlerFactory ─────────────────────────────────────────────
 
-    @Override
-    public ScreenHandler createMenu(int syncId, PlayerInventory playerInv, PlayerEntity player) {
-        return new CreatorScreenHandler(syncId, playerInv, this, delegate);
+    @Override public ScreenHandler createMenu(int syncId, PlayerInventory inv, PlayerEntity player) {
+        return new CreatorScreenHandler(syncId, inv, this, delegate);
     }
-
-    @Override
-    public Text getDisplayName() {
+    @Override public Text getDisplayName() {
         return Text.translatable("block.alchemod.item_creator");
     }
 
     // ── Inventory ─────────────────────────────────────────────────────────────
 
-    @Override public int size()   { return 3; }
-    @Override public boolean isEmpty() { return items.stream().allMatch(ItemStack::isEmpty); }
-    @Override public ItemStack getStack(int slot)            { return items.get(slot); }
+    @Override public int size()       { return 3; }
+    @Override public boolean isEmpty(){ return items.stream().allMatch(ItemStack::isEmpty); }
+    @Override public ItemStack getStack(int slot)           { return items.get(slot); }
     @Override public ItemStack removeStack(int slot, int amount) {
         ItemStack r = Inventories.splitStack(items, slot, amount);
-        if (!r.isEmpty()) markDirty();
-        return r;
+        if (!r.isEmpty()) markDirty(); return r;
     }
-    @Override public ItemStack removeStack(int slot)         { return Inventories.removeStack(items, slot); }
+    @Override public ItemStack removeStack(int slot)        { return Inventories.removeStack(items, slot); }
     @Override public void setStack(int slot, ItemStack stack){ items.set(slot, stack); markDirty(); }
-    @Override public boolean canPlayerUse(PlayerEntity player) {
-        return net.minecraft.inventory.Inventory.canPlayerUse(this, player);
-    }
-    @Override public void clear() { items.clear(); }
+    @Override public boolean canPlayerUse(PlayerEntity p)   { return net.minecraft.inventory.Inventory.canPlayerUse(this, p); }
+    @Override public void clear()                           { items.clear(); }
 
     // ── NBT ───────────────────────────────────────────────────────────────────
 
-    @Override
-    protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
+    @Override protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
         super.writeNbt(nbt, lookup);
         Inventories.writeNbt(nbt, items, lookup);
-        nbt.putInt("State",    state);
-        nbt.putInt("Progress", progress);
-        nbt.putInt("LastSlot", lastCreatedSlot);
+        nbt.putInt("State", state); nbt.putInt("Progress", progress); nbt.putInt("LastSlot", lastCreatedSlot);
     }
-
-    @Override
-    protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
+    @Override protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
         super.readNbt(nbt, lookup);
         Inventories.readNbt(nbt, items, lookup);
-        state           = nbt.getInt("State");
-        progress        = nbt.getInt("Progress");
-        lastCreatedSlot = nbt.getInt("LastSlot");
+        state = nbt.getInt("State"); progress = nbt.getInt("Progress"); lastCreatedSlot = nbt.getInt("LastSlot");
         if (state == STATE_PROCESSING) { state = STATE_IDLE; progress = 0; }
     }
 
     // ── Util ──────────────────────────────────────────────────────────────────
 
     private static String quoted(String s) {
-        return "\"" + s.replace("\\", "\\\\")
-                        .replace("\"", "\\\"")
-                        .replace("\n", "\\n")
-                        .replace("\r", "") + "\"";
+        return "\"" + s.replace("\\","\\\\").replace("\"","\\\"").replace("\n","\\n").replace("\r","") + "\"";
     }
 
-    // ── CreationResult ────────────────────────────────────────────────────────
+    // ── Result record ─────────────────────────────────────────────────────────
 
     record CreationResult(
-            String       name,
-            String       description,
-            String       spritePrompt,
-            String       rarity,
-            List<String> effects,
-            String       special,
-            String       error
+            String name, String description, String spritePrompt,
+            String rarity, String itemType, List<String> effects,
+            String special, String mobType, String error
     ) {
         static CreationResult error(String msg) {
-            return new CreationResult(null, null, null, null, List.of(), null, msg);
+            return new CreationResult(null,null,null,null,"use_item",List.of(),null,null,msg);
         }
     }
 }

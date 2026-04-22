@@ -13,19 +13,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Pre-registers a pool of "dynamic item" slots at startup.
- * Each slot starts as a blank item; when the Creator Forge produces one,
- * we assign it name / description / rarity / effects / special at runtime.
- *
- * Pool size = 64 unique created items per game session.
- */
 public class DynamicItemRegistry {
 
     public static final int POOL_SIZE = 64;
-    private static final List<DynamicItem>              POOL = new ArrayList<>();
-    private static final Map<Integer, CreatedItemMeta>  META = new ConcurrentHashMap<>();
-
+    private static final List<DynamicItem>             POOL = new ArrayList<>();
+    private static final Map<Integer, CreatedItemMeta> META = new ConcurrentHashMap<>();
     private static int nextSlot = 0;
 
     public static void register() {
@@ -47,9 +39,7 @@ public class DynamicItemRegistry {
             AlchemodInit.LOG.warn("[Creator] Dynamic item pool exhausted!");
             return null;
         }
-        int slot = nextSlot++;
-        AlchemodInit.LOG.info("[Creator] Claimed slot {}", slot);
-        return POOL.get(slot);
+        return POOL.get(nextSlot++);
     }
 
     public static void updateSlotMeta(int slot, CreatedItemMeta meta) {
@@ -58,56 +48,44 @@ public class DynamicItemRegistry {
         if (item != null) item.setMeta(meta);
     }
 
-    public static DynamicItem getSlot(int index) {
-        return index >= 0 && index < POOL.size() ? POOL.get(index) : null;
-    }
+    public static DynamicItem     getSlot(int index) { return index >= 0 && index < POOL.size() ? POOL.get(index) : null; }
+    public static CreatedItemMeta getMeta(int slot)   { return META.get(slot); }
 
-    public static CreatedItemMeta getMeta(int slot) {
-        return META.get(slot);
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Meta record
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * Full metadata for one created item.
+     * Full metadata for a created item.
      *
-     * @param name         Display name  — e.g. "Ember Crown"
-     * @param description  Flavour text  — one sentence
-     * @param slot         Dynamic item slot index (0–63)
-     * @param rarity       One of: common | uncommon | rare | epic | legendary
-     * @param effects      Ordered list of vanilla effect IDs assigned by the AI.
-     *                     Length scales with rarity (1 → 4).
-     * @param special      Optional special-ability ID; may be null for low rarities.
-     *                     One of: ignite | knockback | heal_aura | launch |
-     *                             freeze | drain | phase | lightning | void_step
+     * @param itemType  How the item is activated. One of:
+     *                  use_item | bow | spawn_egg | food | sword | totem | throwable
+     * @param mobType   Vanilla entity ID string for spawn_egg type only (e.g. "bat").
+     *                  Empty string / null for all other types.
+     * @param effects   Vanilla effect IDs applied on use (to player or target, by type).
+     * @param special   Named special ability (ignite, knockback, etc.). May be null.
+     * @param rarity    common | uncommon | rare | epic | legendary
      */
     public record CreatedItemMeta(
             String       name,
             String       description,
             int          slot,
             String       rarity,
+            String       itemType,
             List<String> effects,
-            String       special
+            String       special,
+            String       mobType
     ) {
-        /** Charge count used when the item predates the rarity system. */
         public static final int DEFAULT_CHARGES_FALLBACK = 3;
 
-        // ── Rarity helpers ────────────────────────────────────────────────────
-
-        /** § colour code for the item name. */
         public String rarityColour() {
             return switch (rarity().toLowerCase()) {
-                case "uncommon"  -> "§a"; // green
-                case "rare"      -> "§b"; // aqua
-                case "epic"      -> "§d"; // light purple
-                case "legendary" -> "§6"; // gold
-                default          -> "§f"; // white (common)
+                case "uncommon"  -> "§a";
+                case "rare"      -> "§b";
+                case "epic"      -> "§d";
+                case "legendary" -> "§6";
+                default          -> "§f";
             };
         }
 
-        /** Formatted rarity label for the tooltip. */
         public String rarityLabel() {
             return switch (rarity().toLowerCase()) {
                 case "uncommon"  -> "§aUncommon";
@@ -118,20 +96,16 @@ public class DynamicItemRegistry {
             };
         }
 
-        /** Number of charges the item spawns with (scales with rarity). */
         public int startingCharges() {
             return switch (rarity().toLowerCase()) {
                 case "uncommon"  -> 5;
                 case "rare"      -> 6;
                 case "epic"      -> 7;
                 case "legendary" -> 10;
-                default          -> 3; // common
+                default          -> 3;
             };
         }
 
-        // ── Effect label helpers ───────────────────────────────────────────────
-
-        /** Formatted label for a single effect ID. */
         public static String effectLabel(String effect) {
             return switch (effect.toLowerCase().replace("minecraft:", "").trim()) {
                 case "speed"           -> "§9Speed";
@@ -146,14 +120,32 @@ public class DynamicItemRegistry {
                 case "jump_boost"      -> "§aJump Boost";
                 case "slow_falling"    -> "§fSlow Falling";
                 case "water_breathing" -> "§3Water Breathing";
-                default -> "§7" + effect;
+                default                -> "§7" + effect;
             };
         }
 
-        /** Formatted label for the special ability. */
-        public String specialLabel() {
-            if (special() == null || special().isBlank()) return null;
-            return switch (special().toLowerCase()) {
+        public String itemTypeLabel() { return staticItemTypeLabel(itemType()); }
+
+        public String specialLabel() { return staticSpecialLabel(special()); }
+
+        // ── Static equivalents used by DynamicItem.RuntimeMeta ────────────────
+
+        public static String staticItemTypeLabel(String t) {
+            if (t == null) return "§7✦ Use Item";
+            return switch (t.toLowerCase()) {
+                case "bow"       -> "§7🏹 Magical Bow";
+                case "spawn_egg" -> "§7🥚 Spawn Egg";
+                case "food"      -> "§7🍎 Consumable";
+                case "sword"     -> "§7⚔ Melee Weapon";
+                case "totem"     -> "§7🔮 Passive Totem";
+                case "throwable" -> "§7💥 Throwable";
+                default          -> "§7✦ Use Item";
+            };
+        }
+
+        public static String staticSpecialLabel(String special) {
+            if (special == null || special.isBlank()) return null;
+            return switch (special.toLowerCase()) {
                 case "ignite"    -> "§c🔥 Ignite";
                 case "knockback" -> "§7💥 Knockback";
                 case "heal_aura" -> "§a❤ Heal Aura";
@@ -163,7 +155,7 @@ public class DynamicItemRegistry {
                 case "phase"     -> "§d👁 Phase";
                 case "lightning" -> "§e⚡ Lightning";
                 case "void_step" -> "§8✦ Void Step";
-                default -> "§7" + special();
+                default          -> "§7" + special;
             };
         }
     }
