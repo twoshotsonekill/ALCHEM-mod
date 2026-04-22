@@ -344,7 +344,7 @@ public class BuilderBlockEntity extends BlockEntity
     @Nullable
     @Override
     public ScreenHandler createMenu(int syncId, PlayerInventory playerInventory, PlayerEntity player) {
-        return new BuilderScreenHandler(syncId, playerInventory, delegate);
+        return new BuilderScreenHandler(syncId, playerInventory);
     }
 
     // ── NBT persistence ───────────────────────────────────────────────────────

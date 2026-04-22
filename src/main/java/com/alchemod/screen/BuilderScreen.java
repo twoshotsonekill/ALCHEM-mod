@@ -1,7 +1,7 @@
 package com.alchemod.screen;
 
 import com.alchemod.AlchemodInit;
-import com.alchemod.block.PromptBuilderBlockEntity;
+import com.alchemod.block.BuilderBlockEntity;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;

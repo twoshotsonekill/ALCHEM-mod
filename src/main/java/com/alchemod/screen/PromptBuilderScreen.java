@@ -1,7 +1,7 @@
 package com.alchemod.screen;
 
 import com.alchemod.AlchemodInit;
-import com.alchemod.block.PromptBuilderBlockEntity;
+import com.alchemod.block.BuilderBlockEntity;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
@@ -11,14 +11,14 @@ import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 
-public class PromptBuilderScreen extends HandledScreen<PromptBuilderScreenHandler> {
+public class PromptBuilderScreen extends HandledScreen<BuilderScreenHandler> {
 
     private static final Identifier BG = Identifier.ofVanilla("textures/gui/container/furnace.png");
 
     private TextFieldWidget promptField;
     private float animTimer = 0f;
 
-    public BuilderScreen(BuilderScreenHandler handler, PlayerInventory inv, Text title) {
+    public PromptBuilderScreen(BuilderScreenHandler handler, PlayerInventory inv, Text title) {
         super(handler, inv, title);
         backgroundWidth = 176;
         backgroundHeight = 166;
