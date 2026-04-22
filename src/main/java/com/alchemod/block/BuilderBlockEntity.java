@@ -55,6 +55,10 @@ public class BuilderBlockEntity extends BlockEntity
     private String promptText = "";
     private String lastError = "";
     private boolean aiPending = false;
+    private int builderMode = MODE_BLOCK; // 0 = block mode, 1 = text mode
+
+    public static final int MODE_BLOCK = 0;
+    public static final int MODE_TEXT = 1;
 
     private final PropertyDelegate delegate = new PropertyDelegate() {
         @Override public int get(int i) { return i == 0 ? state : progress; }

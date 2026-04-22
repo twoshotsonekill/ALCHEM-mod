@@ -93,4 +93,8 @@ public class BuilderScreenHandler extends ScreenHandler {
     public BlockPos getBlockPos() {
         return blockPos;
     }
+
+    public BlockPos getPos() {
+        return blockPos;
+    }
 }

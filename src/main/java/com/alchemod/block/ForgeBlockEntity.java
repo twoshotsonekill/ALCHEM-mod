@@ -29,6 +29,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -53,9 +55,16 @@ public class ForgeBlockEntity extends BlockEntity
     private final DefaultedList<ItemStack> items =
             DefaultedList.ofSize(3, ItemStack.EMPTY);
 
-    private int state    = STATE_IDLE;
-    private int progress = 0;           // counts up while AI is pending
+    private int state = STATE_IDLE;
+    private int progress = 0;
     private boolean aiPending = false;
+
+    // NBT metadata for custom output
+    private String customName = "";
+    private String customLore = "";
+    private int customColor = -1;
+    private List<String> customEnchantments = new ArrayList<>();
+    private int hideFlags = 0;
 
     // Two ints synced to client: state + progress
     private final PropertyDelegate delegate = new PropertyDelegate() {
@@ -200,7 +209,9 @@ public class ForgeBlockEntity extends BlockEntity
         items.get(SLOT_B).decrement(1);
         if (items.get(SLOT_A).isEmpty()) items.set(SLOT_A, ItemStack.EMPTY);
         if (items.get(SLOT_B).isEmpty()) items.set(SLOT_B, ItemStack.EMPTY);
-        items.set(SLOT_OUTPUT, new ItemStack(item));
+        ItemStack output = new ItemStack(item);
+        applyNbtToStack(output);
+        items.set(SLOT_OUTPUT, output);
 
         progress = MAX_PROGRESS; // fill bar to 100%
         state = STATE_READY;
@@ -249,6 +260,35 @@ public class ForgeBlockEntity extends BlockEntity
 
     public DefaultedList<ItemStack> getItems() { return items; }
 
+    // NBT getter/setter for custom properties
+    public String getCustomName() { return customName; }
+    public void setCustomName(String name) { this.customName = name; }
+    public String getCustomLore() { return customLore; }
+    public void setCustomLore(String lore) { this.customLore = lore; }
+    public int getCustomColor() { return customColor; }
+    public void setCustomColor(int color) { this.customColor = color; }
+    public List<String> getCustomEnchantments() { return customEnchantments; }
+    public void setCustomEnchantments(List<String> ench) { this.customEnchantments = ench; }
+    public int getHideFlags() { return hideFlags; }
+    public void setHideFlags(int flags) { this.hideFlags = flags; }
+
+    private void applyNbtToStack(ItemStack stack) {
+        NbtCompound tag = new NbtCompound();
+        if (!customName.isBlank()) {
+            tag.putString("display_name", customName);
+        }
+        if (!customLore.isBlank()) {
+            tag.putString("display_lore", customLore);
+        }
+        if (customColor != -1) {
+            tag.putInt("display_color", customColor);
+        }
+        if (!customEnchantments.isEmpty()) {
+            tag.putString("enchantments", String.join(",", customEnchantments));
+        }
+        tag.putInt("hide_flags", hideFlags);
+    }
+
     // ── NBT ───────────────────────────────────────────────────────────────────
     @Override
     protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
@@ -256,6 +296,11 @@ public class ForgeBlockEntity extends BlockEntity
         Inventories.writeNbt(nbt, items, lookup);
         nbt.putInt("State", state);
         nbt.putInt("Progress", progress);
+        nbt.putString("CustomName", customName);
+        nbt.putString("CustomLore", customLore);
+        nbt.putInt("CustomColor", customColor);
+        nbt.putString("CustomEnchantments", String.join(",", customEnchantments));
+        nbt.putInt("HideFlags", hideFlags);
     }
 
     @Override
@@ -264,6 +309,14 @@ public class ForgeBlockEntity extends BlockEntity
         Inventories.readNbt(nbt, items, lookup);
         state    = nbt.getInt("State");
         progress = nbt.getInt("Progress");
+        customName = nbt.getString("CustomName");
+        customLore = nbt.getString("CustomLore");
+        customColor = nbt.getInt("CustomColor");
+        String enchStr = nbt.getString("CustomEnchantments");
+        if (!enchStr.isBlank()) {
+            customEnchantments = new ArrayList<>(List.of(enchStr.split(",")));
+        }
+        hideFlags = nbt.getInt("HideFlags");
         // If it was mid-process when the world saved, reset so it retries
         if (state == STATE_PROCESSING) { state = STATE_IDLE; progress = 0; }
     }

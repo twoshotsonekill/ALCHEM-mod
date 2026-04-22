@@ -3,20 +3,26 @@ package com.alchemod.screen;
 import com.alchemod.AlchemodInit;
 import com.alchemod.block.BuilderBlockEntity;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import com.alchemod.network.BuilderPromptPayload;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
+import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.math.BlockPos;
 
 public class PromptBuilderScreen extends HandledScreen<BuilderScreenHandler> {
 
     private static final Identifier BG = Identifier.ofVanilla("textures/gui/container/furnace.png");
 
     private TextFieldWidget promptField;
+    private ButtonWidget modeToggle;
+    private ButtonWidget generateButton;
     private float animTimer = 0f;
+    private boolean textMode = false;
 
     public PromptBuilderScreen(BuilderScreenHandler handler, PlayerInventory inv, Text title) {
         super(handler, inv, title);
@@ -29,11 +35,26 @@ public class PromptBuilderScreen extends HandledScreen<BuilderScreenHandler> {
         super.init();
         titleX = (backgroundWidth - textRenderer.getWidth(title)) / 2;
 
-        // Create text input field
         promptField = new TextFieldWidget(textRenderer, x + 10, y + 30, 156, 20, Text.literal("Prompt"));
         promptField.setMaxLength(200);
         promptField.setPlaceholder(Text.literal("What should I build?"));
+        promptField.setVisible(false);
         addSelectableChild(promptField);
+
+        modeToggle = ButtonWidget.builder(Text.literal("Blocks"), btn -> {
+            textMode = !textMode;
+            btn.setMessage(Text.literal(textMode ? "Text" : "Blocks"));
+            promptField.setVisible(textMode);
+        }).dimensions(x + 130, y + 8, 44, 16).build();
+        addDrawableChild(modeToggle);
+
+        generateButton = ButtonWidget.builder(Text.literal("Generate"), btn -> {
+            if (textMode && !promptField.getText().isBlank()) {
+                submitPrompt();
+            }
+        }).dimensions(x + 10, y + 55, 80, 16).build();
+        generateButton.visible = false;
+        addDrawableChild(generateButton);
     }
 
     @Override
@@ -42,40 +63,27 @@ public class PromptBuilderScreen extends HandledScreen<BuilderScreenHandler> {
         super.render(ctx, mx, my, delta);
         drawMouseoverTooltip(ctx, mx, my);
 
-        // Draw prompt field
-        promptField.render(ctx, mx, my, delta);
+        if (textMode) {
+            promptField.render(ctx, mx, my, delta);
+            generateButton.visible = !promptField.getText().isBlank();
+        } else {
+            generateButton.visible = false;
+        }
     }
 
     @Override
     protected void drawBackground(DrawContext ctx, float delta, int mx, int my) {
         ctx.drawTexture(RenderLayer::getGuiTextured, BG,
                 x, y, 0, 0, backgroundWidth, backgroundHeight, 256, 256);
-
-        int state = handler.getState();
-        int progress = handler.getProgress();
-
-        // Progress arrow
-        int fill = switch (state) {
-            case BuilderBlockEntity.STATE_COMPLETE   -> 24;
-            case BuilderBlockEntity.STATE_PROCESSING,
-                 BuilderBlockEntity.STATE_BUILDING   -> progress * 24 / 100;
-            default -> 0;
-        };
-        if (fill > 0) {
-            ctx.drawTexture(RenderLayer::getGuiTextured, BG,
-                    x + 79, y + 60, 176, 14, fill, 16, 256, 256);
-        }
     }
 
     @Override
     protected void drawForeground(DrawContext ctx, int mouseX, int mouseY) {
-        // Title
         ctx.drawText(textRenderer, title, titleX, titleY, 0x404040, false);
 
-        // Show status below progress bar
         int state = handler.getState();
         String status = switch (state) {
-            case BuilderBlockEntity.STATE_IDLE       -> "Enter a prompt and wait...";
+            case BuilderBlockEntity.STATE_IDLE       -> textMode ? "Enter a prompt and generate" : "Place two items";
             case BuilderBlockEntity.STATE_PROCESSING -> "Generating structure...";
             case BuilderBlockEntity.STATE_BUILDING   -> "Building...";
             case BuilderBlockEntity.STATE_COMPLETE   -> "Structure complete!";
@@ -98,13 +106,10 @@ public class PromptBuilderScreen extends HandledScreen<BuilderScreenHandler> {
         if (promptField.keyPressed(keyCode, scanCode, modifiers)) {
             return true;
         }
-
-        // Enter key to submit
-        if (keyCode == 257 && !promptField.getText().isEmpty()) {
+        if (keyCode == 257 && textMode && !promptField.getText().isEmpty()) {
             submitPrompt();
             return true;
         }
-
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
@@ -113,17 +118,15 @@ public class PromptBuilderScreen extends HandledScreen<BuilderScreenHandler> {
         return promptField.charTyped(chr, modifiers);
     }
 
-    @Override
-    public void mouseMoved(double mx, double my) {
-        promptField.setFocused(mx >= promptField.getX() && mx < promptField.getX() + promptField.getWidth()
-                && my >= promptField.getY() && my < promptField.getY() + promptField.getHeight());
-    }
-
     private void submitPrompt() {
         String prompt = promptField.getText().trim();
         if (!prompt.isEmpty()) {
-            // Send to server via packet or similar
-            AlchemodInit.LOG.info("Builder prompt: {}", prompt);
+            BlockPos pos = handler.getPos();
+            if (pos != null && ClientPlayNetworking.canSend(BuilderPromptPayload.ID)) {
+                BuilderPromptPayload payload = new BuilderPromptPayload(pos, prompt);
+                ClientPlayNetworking.send(payload);
+            }
+            AlchemodInit.LOG.info("Builder prompt sent: {}", prompt);
             promptField.setText("");
         }
     }

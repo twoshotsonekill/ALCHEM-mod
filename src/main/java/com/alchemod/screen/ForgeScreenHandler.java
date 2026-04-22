@@ -83,7 +83,7 @@ public class ForgeScreenHandler extends ScreenHandler {
     @Override
     public boolean canUse(PlayerEntity player) { return inv.canPlayerUse(player); }
 
-    private static class OutputSlot extends Slot {
+private static class OutputSlot extends Slot {
         OutputSlot(Inventory inv, int index, int x, int y) { super(inv, index, x, y); }
 
         @Override public boolean canInsert(ItemStack stack) { return false; }
@@ -94,5 +94,13 @@ public class ForgeScreenHandler extends ScreenHandler {
             if (inventory instanceof ForgeBlockEntity be) be.onOutputTaken();
             super.onTakeItem(player, stack);
         }
+    }
+
+    public Inventory getInventory() {
+        return inv;
+    }
+
+public Inventory getBlockEntity() {
+        return inv;
     }
 }

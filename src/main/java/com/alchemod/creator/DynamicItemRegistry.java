@@ -20,6 +20,14 @@ public class DynamicItemRegistry {
     private static final Map<Integer, CreatedItemMeta> META = new ConcurrentHashMap<>();
     private static int nextSlot = 0;
 
+    public static final String[][] RARITY_COLORS = {
+            {"§f", "§8", "gray"},        // common
+            {"§a", "§2", "green"},      // uncommon
+            {"§b", "§3", "cyan"},       // rare
+            {"§d", "§5", "purple"},      // epic
+            {"§e", "§6", "gold"}        // legendary
+    };
+
     public static void register() {
         for (int i = 0; i < POOL_SIZE; i++) {
             Identifier id = Identifier.of(AlchemodInit.MOD_ID, "dynamic_item_" + i);

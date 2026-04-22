@@ -3,8 +3,11 @@ package com.alchemod.screen;
 import com.alchemod.block.ForgeBlockEntity;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
+import net.minecraft.client.gui.widget.ButtonWidget;
+import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.inventory.Inventory;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 
@@ -12,6 +15,14 @@ public class ForgeScreen extends HandledScreen<ForgeScreenHandler> {
 
     private static final Identifier BG =
             Identifier.ofVanilla("textures/gui/container/furnace.png");
+
+    private TextFieldWidget nameField;
+    private TextFieldWidget loreField;
+    private TextFieldWidget enchantField;
+    private TextFieldWidget colorField;
+    private ButtonWidget applyButton;
+    private ButtonWidget nbtToggleButton;
+    private boolean nbtVisible = false;
 
     public ForgeScreen(ForgeScreenHandler handler, PlayerInventory inv, Text title) {
         super(handler, inv, title);
@@ -23,18 +34,57 @@ public class ForgeScreen extends HandledScreen<ForgeScreenHandler> {
     protected void init() {
         super.init();
         titleX = (backgroundWidth - textRenderer.getWidth(title)) / 2;
+
+        nbtToggleButton = ButtonWidget.builder(Text.literal("NBT"), btn -> {
+            nbtVisible = !nbtVisible;
+            updateFieldVisibility();
+        }).dimensions(x + 150, y + 4, 24, 16).build();
+        addDrawableChild(nbtToggleButton);
+
+        int fieldWidth = 156;
+        int startY = y + 85;
+
+        nameField = new TextFieldWidget(textRenderer, x + 10, startY, fieldWidth, 16, Text.literal("Name"));
+        nameField.setMaxLength(50);
+        nameField.setPlaceholder(Text.literal("Custom Name (optional)"));
+
+        loreField = new TextFieldWidget(textRenderer, x + 10, startY + 20, fieldWidth, 16, Text.literal("Lore"));
+        loreField.setMaxLength(100);
+        loreField.setPlaceholder(Text.literal("Lore line (optional)"));
+
+        enchantField = new TextFieldWidget(textRenderer, x + 10, startY + 40, 100, 16, Text.literal("Enchant"));
+        enchantField.setMaxLength(30);
+        enchantField.setPlaceholder(Text.literal("enchant_id"));
+
+        colorField = new TextFieldWidget(textRenderer, x + 115, startY + 40, 51, 16, Text.literal("Color"));
+        colorField.setMaxLength(6);
+        colorField.setPlaceholder(Text.literal("hex"));
+
+        applyButton = ButtonWidget.builder(Text.literal("Apply"), btn -> {
+            applyNbtToBlockEntity();
+        }).dimensions(x + 10, startY + 62, 60, 16).build();
+
+        nameField.setVisible(false);
+        loreField.setVisible(false);
+        enchantField.setVisible(false);
+        colorField.setVisible(false);
+        applyButton.visible = false;
+
+        addSelectableChild(nameField);
+        addSelectableChild(loreField);
+        addSelectableChild(enchantField);
+        addSelectableChild(colorField);
+        addDrawableChild(applyButton);
     }
 
     @Override
     protected void drawBackground(DrawContext ctx, float delta, int mx, int my) {
-        // Background panel
         ctx.drawTexture(RenderLayer::getGuiTextured, BG,
                 x, y, 0, 0, backgroundWidth, backgroundHeight, 256, 256);
 
         int state    = handler.getState();
         int progress = handler.getProgress();
 
-        // Progress arrow — furnace sprite at u=176, v=14, 24×16 px, at gui pos (79, 34)
         int arrowFill = switch (state) {
             case ForgeBlockEntity.STATE_READY      -> 24;
             case ForgeBlockEntity.STATE_PROCESSING -> progress * 24 / 80;
@@ -46,25 +96,14 @@ public class ForgeScreen extends HandledScreen<ForgeScreenHandler> {
         }
     }
 
-    /**
-     * drawForeground runs AFTER drawBackground and item rendering, using GUI-relative
-     * coordinates (origin already translated to (x, y)).
-     *
-     * We draw only the title and our status line here.
-     * The status sits at relative y=71 — safely in the 14-px gap between the bottom
-     * of SLOT_B (relative y=53+16=69) and the top of the player inventory (relative y=83).
-     * We suppress the default "Inventory" label (relative y=72) so it does not overlap.
-     */
     @Override
     protected void drawForeground(DrawContext ctx, int mouseX, int mouseY) {
-        // Title
         ctx.drawText(textRenderer, title, titleX, titleY, 0x404040, false);
 
-        // Status — relative coords (GUI origin already translated)
         int state = handler.getState();
         String status = switch (state) {
             case ForgeBlockEntity.STATE_IDLE       -> "Place two items to combine";
-            case ForgeBlockEntity.STATE_PROCESSING -> "Combining\u2026";
+            case ForgeBlockEntity.STATE_PROCESSING -> "Combining...";
             case ForgeBlockEntity.STATE_READY      -> "Take your result!";
             case ForgeBlockEntity.STATE_ERROR      -> "AI error \u2014 check logs";
             default -> "";
@@ -77,15 +116,41 @@ public class ForgeScreen extends HandledScreen<ForgeScreenHandler> {
         };
         int sx = (backgroundWidth - textRenderer.getWidth(status)) / 2;
         ctx.drawText(textRenderer, status, sx, 71, col, false);
-
-        // Intentionally NOT calling super — that would draw the "Inventory" label at
-        // relative y=72, which collides with our status line at y=71.
-        // Player inventory label is omitted; the contents make it self-evident.
     }
 
     @Override
     public void render(DrawContext ctx, int mx, int my, float delta) {
         super.render(ctx, mx, my, delta);
         drawMouseoverTooltip(ctx, mx, my);
+    }
+
+    private void updateFieldVisibility() {
+        nameField.setVisible(nbtVisible);
+        loreField.setVisible(nbtVisible);
+        enchantField.setVisible(nbtVisible);
+        colorField.setVisible(nbtVisible);
+        applyButton.visible = nbtVisible;
+    }
+
+    private void applyNbtToBlockEntity() {
+        Inventory inv = handler.getInventory();
+        if (inv instanceof ForgeBlockEntity be) {
+            String name = nameField.getText().trim();
+            String lore = loreField.getText().trim();
+            String ench = enchantField.getText().trim();
+            int color = -1;
+            try {
+                if (!colorField.getText().isBlank()) {
+                    color = Integer.parseInt(colorField.getText().trim(), 16);
+                }
+            } catch (NumberFormatException ignored) {}
+
+            be.setCustomName(name);
+            be.setCustomLore(lore);
+            be.setCustomColor(color);
+            if (!ench.isBlank()) {
+                be.setCustomEnchantments(java.util.List.of(ench));
+            }
+        }
     }
 }
