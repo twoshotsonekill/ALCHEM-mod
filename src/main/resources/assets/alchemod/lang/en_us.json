@@ -1,4 +1,5 @@
 {
   "block.alchemod.alchemical_forge": "Alchemical Forge",
-  "block.alchemod.item_creator": "Item Creator"
+  "block.alchemod.item_creator": "Item Creator",
+  "block.alchemod.build_creator": "Build Creator"
 }

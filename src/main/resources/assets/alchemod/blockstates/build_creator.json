@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "alchemod:block/build_creator"
+    }
+  }
+}

@@ -1,10 +1,13 @@
 package com.alchemod;
 
+import com.alchemod.block.BuilderBlock;
+import com.alchemod.block.BuilderBlockEntity;
 import com.alchemod.block.CreatorBlock;
 import com.alchemod.block.CreatorBlockEntity;
 import com.alchemod.block.ForgeBlock;
 import com.alchemod.block.ForgeBlockEntity;
 import com.alchemod.creator.DynamicItemRegistry;
+import com.alchemod.screen.BuilderScreenHandler;
 import com.alchemod.screen.CreatorScreenHandler;
 import com.alchemod.screen.ForgeScreenHandler;
 import net.fabricmc.api.ModInitializer;
@@ -45,38 +48,23 @@ public class AlchemodInit implements ModInitializer {
     // Populated in onInitialize after FabricLoader is ready
     public static String OPENROUTER_KEY = "";
 
-    // ── Blocks & Items ────────────────────────────────────────────────────────
+    // ── Blocks & Items (initialized in onInitialize to avoid static init issues) ──
 
-    public static final Block FORGE_BLOCK = Registry.register(
-            Registries.BLOCK, Identifier.of(MOD_ID, "alchemical_forge"),
-            new ForgeBlock(AbstractBlock.Settings.create()
-                    .registryKey(RegistryKey.of(RegistryKeys.BLOCK, Identifier.of(MOD_ID, "alchemical_forge")))
-                    .mapColor(MapColor.PURPLE).strength(4f, 8f).requiresTool()
-                    .sounds(BlockSoundGroup.METAL).luminance(s -> 3)));
-
-    public static final Item FORGE_ITEM = Registry.register(
-            Registries.ITEM, Identifier.of(MOD_ID, "alchemical_forge"),
-            new BlockItem(FORGE_BLOCK, new Item.Settings()
-                    .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "alchemical_forge")))));
-
-    public static final Block CREATOR_BLOCK = Registry.register(
-            Registries.BLOCK, Identifier.of(MOD_ID, "item_creator"),
-            new CreatorBlock(AbstractBlock.Settings.create()
-                    .registryKey(RegistryKey.of(RegistryKeys.BLOCK, Identifier.of(MOD_ID, "item_creator")))
-                    .mapColor(MapColor.GOLD).strength(4f, 8f).requiresTool()
-                    .sounds(BlockSoundGroup.METAL).luminance(s -> 5)));
-
-    public static final Item CREATOR_ITEM = Registry.register(
-            Registries.ITEM, Identifier.of(MOD_ID, "item_creator"),
-            new BlockItem(CREATOR_BLOCK, new Item.Settings()
-                    .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "item_creator")))));
+    public static Block FORGE_BLOCK;
+    public static Item FORGE_ITEM;
+    public static Block CREATOR_BLOCK;
+    public static Item CREATOR_ITEM;
+    public static Block BUILDER_BLOCK;
+    public static Item BUILDER_ITEM;
 
     // ── Registry handles ──────────────────────────────────────────────────────
 
     public static BlockEntityType<ForgeBlockEntity>       FORGE_BE_TYPE;
     public static BlockEntityType<CreatorBlockEntity>     CREATOR_BE_TYPE;
+    public static BlockEntityType<BuilderBlockEntity>     BUILDER_BE_TYPE;
     public static ScreenHandlerType<ForgeScreenHandler>   FORGE_HANDLER;
     public static ScreenHandlerType<CreatorScreenHandler> CREATOR_HANDLER;
+    public static ScreenHandlerType<BuilderScreenHandler> BUILDER_HANDLER;
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -84,6 +72,43 @@ public class AlchemodInit implements ModInitializer {
     public void onInitialize() {
         OPENROUTER_KEY = loadApiKey();
         LOG.info("Alchemod initialising — API key: {}", !OPENROUTER_KEY.isBlank() ? "SET" : "MISSING");
+
+        // Register blocks and items (delayed from static init to avoid registry issues)
+        FORGE_BLOCK = Registry.register(
+                Registries.BLOCK, Identifier.of(MOD_ID, "alchemical_forge"),
+                new ForgeBlock(AbstractBlock.Settings.create()
+                        .registryKey(RegistryKey.of(RegistryKeys.BLOCK, Identifier.of(MOD_ID, "alchemical_forge")))
+                        .mapColor(MapColor.PURPLE).strength(4f, 8f).requiresTool()
+                        .sounds(BlockSoundGroup.METAL).luminance(s -> 3)));
+
+        FORGE_ITEM = Registry.register(
+                Registries.ITEM, Identifier.of(MOD_ID, "alchemical_forge"),
+                new BlockItem(FORGE_BLOCK, new Item.Settings()
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "alchemical_forge")))));
+
+        CREATOR_BLOCK = Registry.register(
+                Registries.BLOCK, Identifier.of(MOD_ID, "item_creator"),
+                new CreatorBlock(AbstractBlock.Settings.create()
+                        .registryKey(RegistryKey.of(RegistryKeys.BLOCK, Identifier.of(MOD_ID, "item_creator")))
+                        .mapColor(MapColor.GOLD).strength(4f, 8f).requiresTool()
+                        .sounds(BlockSoundGroup.METAL).luminance(s -> 5)));
+
+        CREATOR_ITEM = Registry.register(
+                Registries.ITEM, Identifier.of(MOD_ID, "item_creator"),
+                new BlockItem(CREATOR_BLOCK, new Item.Settings()
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "item_creator")))));
+
+        BUILDER_BLOCK = Registry.register(
+                Registries.BLOCK, Identifier.of(MOD_ID, "build_creator"),
+                new BuilderBlock(AbstractBlock.Settings.create()
+                        .registryKey(RegistryKey.of(RegistryKeys.BLOCK, Identifier.of(MOD_ID, "build_creator")))
+                        .mapColor(MapColor.BROWN).strength(4f, 8f).requiresTool()
+                        .sounds(BlockSoundGroup.METAL).luminance(s -> 4)));
+
+        BUILDER_ITEM = Registry.register(
+                Registries.ITEM, Identifier.of(MOD_ID, "build_creator"),
+                new BlockItem(BUILDER_BLOCK, new Item.Settings()
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "build_creator")))));
 
         DynamicItemRegistry.register();
 
@@ -95,6 +120,10 @@ public class AlchemodInit implements ModInitializer {
                 Identifier.of(MOD_ID, "item_creator"),
                 FabricBlockEntityTypeBuilder.create(CreatorBlockEntity::new, CREATOR_BLOCK).build());
 
+        BUILDER_BE_TYPE = Registry.register(Registries.BLOCK_ENTITY_TYPE,
+                Identifier.of(MOD_ID, "build_creator"),
+                FabricBlockEntityTypeBuilder.create(BuilderBlockEntity::new, BUILDER_BLOCK).build());
+
         FORGE_HANDLER = Registry.register(Registries.SCREEN_HANDLER,
                 Identifier.of(MOD_ID, "alchemical_forge"),
                 new ScreenHandlerType<>(ForgeScreenHandler::new, FeatureSet.empty()));
@@ -103,9 +132,14 @@ public class AlchemodInit implements ModInitializer {
                 Identifier.of(MOD_ID, "item_creator"),
                 new ScreenHandlerType<>(CreatorScreenHandler::new, FeatureSet.empty()));
 
+        BUILDER_HANDLER = Registry.register(Registries.SCREEN_HANDLER,
+                Identifier.of(MOD_ID, "build_creator"),
+                new ScreenHandlerType<>(BuilderScreenHandler::new, FeatureSet.empty()));
+
         ItemGroupEvents.modifyEntriesEvent(ItemGroups.FUNCTIONAL).register(e -> {
             e.add(FORGE_ITEM);
             e.add(CREATOR_ITEM);
+            e.add(BUILDER_ITEM);
         });
     }
 
