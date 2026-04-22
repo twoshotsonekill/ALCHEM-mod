@@ -15,25 +15,67 @@
 
 ---
 
+## Priority 7: Image Generation for Item Sprites
+
+**Item Creator should generate sprites from:**
+1. **Block inputs** - Colors from placed blocks
+2. **AI Image Generation** - Send text description to AI
+3. **Reference Image** - Upload/copy from existing texture
+
+**AI Image Pipeline:**
+```
+User text prompt → OpenRouter AI → Image response → Parse to sprite → Save as item texture
+```
+
+**Image Generation Features:**
+- Support stable diffusion endpoints
+- Parse AI image to 16x16 pixel art
+- Color quantization to game palette
+- Dithering for smooth gradients
+- Custom model support
+
+**Implementation:**
+- Add `ImageGenerator.java` utility
+- Uses OpenRouter API for image generation
+- Converts AI image → Minecraft sprite format
+- Links texture to DynamicItem
+
+---
+
 ## Priority 2: Improve Item Creator Texture Generation
 
 **Current Issue:** Textures are static/colored placeholders.
 
 **Solution:**
-- Generate unique sprite based on item properties
-- Colors based on rarity: common=gray, uncommon=green, rare=aqua, epic=purple, legendary=gold
-- Shape based on item form (amulet, dagger, crown, etc.)
-- Add special effect glow overlays for powers
-- Use `RuntimeTextureManager` to generate at creation time
+- Generate texture **based on input blocks/items placed in the creator**
+- Analyze colors of input items
+- Mix/bend colors to create unique sprite
+- Include patterns from input materials
+- Add rarity border overlay
+- Add power effect symbols
+
+**Texture Generation from Inputs:**
+1. Player places input items (Up to 9 items in grid)
+2. Extract color palette from each input item's texture  
+3. Blend/gradient colors together
+4. Add geometric pattern based on item form
+5. Apply rarity border color
+6. Add power indicator symbol
 
 **Sprite Generation Logic:**
-- Base: unique geometric pattern per form
-- Border: rarity color
-- Center: power effect symbol
-- Glow: pulsing animation for special abilities
+- Input: Items in 3x3 grid → Color analysis
+- Process: Color blending algorithm
+- Output: Unique 16x16 sprite
+- Border: rarity color (gray/green/aqua/purple/gold)
+- Center: power symbol
+
+**Example:**
+- Input: diamond + redstone → Red sparkle pattern
+- Input: emerald + glass → Green crystal pattern
+- Input: gold + blaze → Gold flame pattern
 
 **Files to modify:**
-- `RuntimeTextureManager.java` - New texture generation
+- `RuntimeTextureManager.java` - New texture generation from inputs
 - `CreatorBlockEntity.java` - Trigger texture generation on create
 
 ---
@@ -150,26 +192,25 @@ Each form gets unique handling:
 
 ## Priority 6: Two Build Creator Variants
 
-**NOTE: The zip did not contain separate files for two variants. Current BuilderBlock handles block inputs. Need to add text version.**
-
-**Build Creator Text (New):**
-- Input: Text prompts only
-- Uses AI to generate voxel code
-- Best for complex/creative builds
-- Single block placed in world
-
-**Build Creator Blocks (Current=BuilderBlock):**
-- Input: 3x3 grid of blocks (like crafting)
-- Player places blocks into input slots
+**Variant A: Block-Based (Current BuilderBlock)**
+- Input: Player places real Minecraft blocks in 3x3 grid
 - Combines blocks into structure
-- Best for exact building
-- More hands-on
+- Best for exact building from materials
+- More hands-on, visual feedback
+- 9 input slots (like crafting table)
 
-**Implementation for Text Version:**
-- Create `PromptBlock.java` - extends Block
-- Create `PromptBlockEntity.java` - handles AI calls
-- Create `PromptScreen.java` - simple text input GUI
-- Uses existing networking from BuilderBlock
+**Variant B: Text-Based (Current BuilderBlock with toggle)**
+- Input: Text prompt describes what to build
+- AI generates voxel code
+- Best for complex/creative builds
+- Toggle mode in GUI: "Block Mode" / "Text Mode"
+
+**Screen Layouts:**
+- **Block Input GUI:** 3x3 grid + preview + "Generate" button
+- **Text Input GUI:** Text field + prompt dropdowns + "Generate" button
+
+**Implementation:**
+- Keep existing `BuilderBlock` with mode toggle in GUI
 
 ---
 
@@ -203,16 +244,20 @@ Each form gets unique handling:
 
 ## Files from (10).zip to Integrate
 
-The zip file contains additional files that should be integrated:
-- `BuilderBlockEntity.java` - Already present, improve functionality
-- `PromptBlock.java` / `PromptBlockEntity.java` - Add as "Text Builder"
-- `PromptBuilderScreen.java` - Text input GUI
-- `BuilderPromptPayload.java` / `PromptPayload.java` - Network packets
+The zip file was missing some files. Need to add Text Builder implementation:
 
-**Implementation:**
-1. Rename PromptBlock → BuildCreatorText
-2. Keep existing BuilderBlock → BuildCreatorBlocks  
-3. Both should have different GUIs
+**Current (already works):**
+- `BuilderBlock.java` + `BuilderBlockEntity.java` - Block input version
+
+**Need to add for Text version:**
+1. Create `PromptBlock.java` - Text input block (like BuilderBlock but with text field)
+2. Create `PromptBlockEntity.java` - Sends prompts to AI
+3. Create `PromptScreen.java` - GUI with text input field
+4. Create network payloads for text → AI response
+
+**Alternative: Make existing BuilderBlock have two modes**
+- Mode A: Block input (current)
+- Mode B: Text input (toggle in GUI)
 
 ---
 
