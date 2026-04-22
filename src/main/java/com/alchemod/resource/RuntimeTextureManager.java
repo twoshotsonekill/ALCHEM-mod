@@ -6,6 +6,7 @@ import net.fabricmc.api.Environment;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.texture.NativeImage;
 import net.minecraft.client.texture.NativeImageBackedTexture;
+import net.minecraft.item.ItemStack;
 import net.minecraft.util.Identifier;
 
 import java.io.InputStream;
@@ -14,17 +15,16 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 /**
- * Downloads a 16×16 pixel-art sprite from Pollinations.ai (free, no key required)
- * and registers it as a NativeImageBackedTexture on the client's TextureManager.
- *
- * The texture ID returned is used directly in the item model JSON override we
- * inject via DynamicResourcePack.
+ * Generates dynamic textures for created items. Supports two modes:
+ * 1. AI-generated sprite from Pollinations.ai (fallback)
+ * 2. Procedural texture based on input item colors
  */
 @Environment(EnvType.CLIENT)
 public class RuntimeTextureManager {
@@ -34,15 +34,34 @@ public class RuntimeTextureManager {
             .followRedirects(java.net.http.HttpClient.Redirect.ALWAYS)
             .build();
 
-    // Cache so we don't re-download the same slot
     private static final Map<Integer, Identifier> LOADED = new ConcurrentHashMap<>();
+
+    /**
+     * Generate texture from input items (based on their colors).
+     * Falls back to AI sprite if itemColors is empty.
+     */
+    public static void generateFromInputs(int slot, Map<String, Integer> itemColors, String aiPrompt, Consumer<Identifier> onReady) {
+        if (LOADED.containsKey(slot)) {
+            onReady.accept(LOADED.get(slot));
+            return;
+        }
+
+        // Generate procedural texture from input colors
+        if (itemColors != null && !itemColors.isEmpty()) {
+            MinecraftClient.getInstance().execute(() -> {
+                Identifier id = generateFromColors(slot, itemColors);
+                LOADED.put(slot, id);
+                onReady.accept(id);
+            });
+        } else {
+            // Fall back to AI sprite
+            downloadSprite(aiPrompt, slot, onReady);
+        }
+    }
 
     /**
      * Kick off an async sprite download for the given slot index.
      * When done, calls onReady with the texture Identifier on the render thread.
-     *
-     * prompt  — the Pollinations image prompt (item name + description)
-     * slot    — the dynamic item slot index (used to form the texture ID)
      */
     public static void downloadSprite(String prompt, int slot, Consumer<Identifier> onReady) {
         if (LOADED.containsKey(slot)) {
@@ -167,6 +186,102 @@ public class RuntimeTextureManager {
         NativeImageBackedTexture tex = new NativeImageBackedTexture(img);
         MinecraftClient.getInstance().getTextureManager().registerTexture(id, tex);
         return id;
+    }
+
+    /**
+     * Generates a 16×16 procedural texture based on input item colors.
+     * Blends colors together and adds patterns based on rarity.
+     */
+    private static Identifier generateFromColors(int slot, Map<String, Integer> itemColors) {
+        Identifier id = Identifier.of(AlchemodInit.MOD_ID,
+                "textures/item/dynamic_item_" + slot + ".png");
+
+        // Get primary and secondary colors from inputs
+        int primaryColor = 0xFF8844AA;
+        int secondaryColor = 0xFF4422AA;
+
+        if (!itemColors.isEmpty()) {
+            var entryIter = itemColors.entrySet().iterator();
+            if (entryIter.hasNext()) {
+                primaryColor = entryIter.next().getValue();
+            }
+            if (entryIter.hasNext()) {
+                secondaryColor = entryIter.next().getValue();
+            }
+        }
+
+        int pr = (primaryColor >> 16) & 0xFF;
+        int pg = (primaryColor >> 8) & 0xFF;
+        int pb = primaryColor & 0xFF;
+        int sr = (secondaryColor >> 16) & 0xFF;
+        int sg = (secondaryColor >> 8) & 0xFF;
+        int sb = secondaryColor & 0xFF;
+
+        // Rarity border color based on slot
+        int rarityColor = getRarityColor(slot);
+
+        NativeImage img = new NativeImage(NativeImage.Format.RGBA, 16, 16, false);
+        for (int y = 0; y < 16; y++) {
+            for (int x = 0; x < 16; x++) {
+                boolean border = (x <= 1 || x >= 14 || y <= 1 || y >= 14);
+                boolean innerBorder = (x == 2 || x == 13 || y == 2 || y == 13);
+                boolean center = (x >= 5 && x <= 10 && y >= 5 && y <= 10);
+                boolean corner = (x < 3 || x > 12) && (y < 3 || y > 12);
+
+                int r, g, b, a;
+                if (corner) {
+                    a = 0;
+                    r = g = b = 0;
+                } else if (border) {
+                    // Rarity border
+                    r = (rarityColor >> 16) & 0xFF;
+                    g = (rarityColor >> 8) & 0xFF;
+                    b = rarityColor & 0xFF;
+                    a = 255;
+                } else if (center) {
+                    // Center highlight - blend of colors with gradient
+                    float t = (x + y) / 20.0f;
+                    r = (int)(pr * (1 - t) + sr * t);
+                    g = (int)(pg * (1 - t) + sg * t);
+                    b = (int)(pb * (1 - t) + sb * t);
+                    a = 255;
+                } else if (innerBorder) {
+                    // Secondary color ring
+                    r = sr;
+                    g = sg;
+                    b = sb;
+                    a = 255;
+                } else {
+                    // Main area - blend with pattern
+                    float blend = ((x * 3 + y * 2) % 7) / 7.0f;
+                    r = (int)(pr * (1 - blend * 0.5) + 40 * blend);
+                    g = (int)(pg * (1 - blend * 0.5) + 40 * blend);
+                    b = (int)(pb * (1 - blend * 0.5) + 60 * blend);
+                    a = 255;
+                }
+
+                int argb = (a << 24) | (r << 16) | (g << 8) | b;
+                img.setColorArgb(x, y, argb);
+            }
+        }
+
+        NativeImageBackedTexture tex = new NativeImageBackedTexture(img);
+        MinecraftClient.getInstance().getTextureManager().registerTexture(id, tex);
+        return id;
+    }
+
+    /**
+     * Get rarity color based on slot (cycles through rarities).
+     */
+    private static int getRarityColor(int slot) {
+        int[] rarityColors = {
+            0xFF9E9E9E, // common - gray
+            0xFF55AA55, // uncommon - green
+            0xFF55AAAA, // rare - aqua
+            0xFFAA55AA, // epic - purple
+            0xFFFFAA00  // legendary - gold
+        };
+        return rarityColors[slot % rarityColors.length];
     }
 
     private static String encodeUrl(String s) {

@@ -89,6 +89,10 @@ public class CreatorScreenHandler extends ScreenHandler {
         public boolean canInsert(ItemStack stack) {
             return !isProcessing();
         }
+
+        public boolean canTakeStack(PlayerEntity player) {
+            return !isProcessing();
+        }
     }
 
     private static class OutputSlot extends Slot {
