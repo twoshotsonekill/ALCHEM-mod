@@ -2,6 +2,7 @@ package com.alchemod.screen;
 
 import com.alchemod.AlchemodInit;
 import com.alchemod.block.BuilderBlockEntity;
+import com.alchemod.network.BuilderPromptPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
@@ -10,6 +11,7 @@ import net.minecraft.client.render.RenderLayer;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.math.BlockPos;
 
 public class BuilderScreen extends HandledScreen<BuilderScreenHandler> {
 
@@ -121,10 +123,16 @@ public class BuilderScreen extends HandledScreen<BuilderScreenHandler> {
 
     private void submitPrompt() {
         String prompt = promptField.getText().trim();
-        if (!prompt.isEmpty()) {
-            // Send to server via packet or similar
-            AlchemodInit.LOG.info("Builder prompt: {}", prompt);
-            promptField.setText("");
+        if (prompt.isEmpty()) return;
+
+        BlockPos pos = handler.getBlockPos();
+        if (pos == null) {
+            AlchemodInit.LOG.warn("[BuilderScreen] No block pos - cannot send prompt");
+            return;
         }
+
+        ClientPlayNetworking.send(new BuilderPromptPayload(pos, prompt));
+        AlchemodInit.LOG.info("[BuilderScreen] Sent prompt: {}", prompt);
+        promptField.setText("");
     }
 }

@@ -344,7 +344,7 @@ public class BuilderBlockEntity extends BlockEntity
     @Nullable
     @Override
     public ScreenHandler createMenu(int syncId, PlayerInventory playerInventory, PlayerEntity player) {
-        return new BuilderScreenHandler(syncId, playerInventory);
+        return new BuilderScreenHandler(syncId, playerInventory, this, delegate, getPos());
     }
 
     // ── NBT persistence ───────────────────────────────────────────────────────
@@ -372,4 +372,11 @@ public class BuilderBlockEntity extends BlockEntity
     public String getPrompt() { return promptText; }
     public String getError() { return lastError; }
     public PropertyDelegate getDelegate() { return delegate; }
+
+    // Called from server when player sends text prompt via packet
+    public void receivePrompt(String prompt, World world) {
+        if (prompt != null && !prompt.isBlank()) {
+            startBuild(prompt, world);
+        }
+    }
 }

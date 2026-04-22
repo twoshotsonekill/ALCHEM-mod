@@ -12,18 +12,21 @@ import net.minecraft.screen.PropertyDelegate;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.screen.slot.Slot;
+import net.minecraft.util.math.BlockPos;
 
 public class BuilderScreenHandler extends ScreenHandler {
 
     private final Inventory inv;
     private final PropertyDelegate propertyDelegate;
+    private final BlockPos blockPos;
 
     public BuilderScreenHandler(int syncId, PlayerInventory playerInventory,
-            Inventory inv, PropertyDelegate propertyDelegate) {
+            Inventory inv, PropertyDelegate propertyDelegate, BlockPos blockPos) {
         super(AlchemodInit.BUILDER_HANDLER, syncId);
         checkSize(inv, 2);
         this.inv = inv;
         this.propertyDelegate = propertyDelegate;
+        this.blockPos = blockPos;
         inv.onOpen(playerInventory.player);
 
         addSlot(new Slot(inv, BuilderBlockEntity.SLOT_A, 56, 17));
@@ -42,7 +45,7 @@ public class BuilderScreenHandler extends ScreenHandler {
     }
 
     public BuilderScreenHandler(int syncId, PlayerInventory playerInventory) {
-        this(syncId, playerInventory, new SimpleInventory(3), new ArrayPropertyDelegate(2));
+        this(syncId, playerInventory, new SimpleInventory(3), new ArrayPropertyDelegate(2), null);
     }
 
     @Override
@@ -85,5 +88,9 @@ public class BuilderScreenHandler extends ScreenHandler {
 
     public int getProgress() {
         return propertyDelegate.get(1);
+    }
+
+    public BlockPos getBlockPos() {
+        return blockPos;
     }
 }

@@ -8,6 +8,7 @@ import com.alchemod.block.ForgeBlock;
 import com.alchemod.block.ForgeBlockEntity;
 import com.alchemod.creator.DynamicItemRegistry;
 import com.alchemod.event.ItemAbilityEvents;
+import com.alchemod.network.BuilderPromptPayload;
 import com.alchemod.screen.BuilderScreenHandler;
 import com.alchemod.screen.CreatorScreenHandler;
 import com.alchemod.screen.ForgeScreenHandler;
@@ -137,6 +138,30 @@ public class AlchemodInit implements ModInitializer {
         BUILDER_HANDLER = Registry.register(Registries.SCREEN_HANDLER,
                 Identifier.of(MOD_ID, "build_creator"),
                 new ScreenHandlerType<>(BuilderScreenHandler::new, FeatureSet.empty()));
+
+        // Register networking for builder text prompts
+        net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playC2S().register(
+                com.alchemod.network.BuilderPromptPayload.ID,
+                com.alchemod.network.BuilderPromptPayload.CODEC);
+        net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(
+                com.alchemod.network.BuilderPromptPayload.ID, (payload, context) -> {
+                    context.server().execute(() -> {
+                        var player = context.player();
+                        var world = player.getServerWorld();
+                        var be = world.getBlockEntity(payload.pos());
+                        if (be instanceof BuilderBlockEntity builder) {
+                            double dist = player.squaredDistanceTo(
+                                    payload.pos().getX() + 0.5,
+                                    payload.pos().getY() + 0.5,
+                                    payload.pos().getZ() + 0.5);
+                            if (dist <= 64.0) {
+                                builder.startBuild(payload.prompt(), world);
+                            } else {
+                                LOG.warn("[Alchemod] {} tried to trigger builder from too far", player.getName().getString());
+                            }
+                        }
+                    });
+                });
 
         ItemGroupEvents.modifyEntriesEvent(ItemGroups.FUNCTIONAL).register(e -> {
             e.add(FORGE_ITEM);
