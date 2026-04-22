@@ -17,7 +17,6 @@ public class CreatorScreenHandler extends ScreenHandler {
     private final Inventory inv;
     private final PropertyDelegate delegate;
 
-    private static final int STATE_IDLE       = 0;
     private static final int STATE_PROCESSING = 1;
 
     public CreatorScreenHandler(int syncId, PlayerInventory playerInv,
@@ -46,9 +45,9 @@ public class CreatorScreenHandler extends ScreenHandler {
         this(syncId, playerInv, new SimpleInventory(3), new ArrayPropertyDelegate(3));
     }
 
-    public int getState()            { return delegate.get(0); }
+    public int getState()           { return delegate.get(0); }
     public int getProgress()        { return delegate.get(1); }
-    public int getLastCreatedSlot()   { return delegate.get(2); }
+    public int getLastCreatedSlot() { return delegate.get(2); }
 
     private boolean isProcessing() {
         return delegate.get(0) == STATE_PROCESSING;
@@ -82,14 +81,22 @@ public class CreatorScreenHandler extends ScreenHandler {
 
     @Override public boolean canUse(PlayerEntity player) { return inv.canPlayerUse(player); }
 
+    // ── Slot inner classes ────────────────────────────────────────────────────
+
     private class InputSlot extends Slot {
         InputSlot(Inventory inv, int index, int x, int y) { super(inv, index, x, y); }
 
+        /** Prevent inserting items into the input slots while the AI is processing. */
         @Override
         public boolean canInsert(ItemStack stack) {
             return !isProcessing();
         }
 
+        /**
+         * Prevent taking items OUT of the input slots while the AI is processing.
+         * Without this override, players could pull their inputs back mid-craft,
+         * leaving the state machine in STATE_PROCESSING forever with empty slots.
+         */
         public boolean canTakeStack(PlayerEntity player) {
             return !isProcessing();
         }
@@ -97,9 +104,12 @@ public class CreatorScreenHandler extends ScreenHandler {
 
     private static class OutputSlot extends Slot {
         OutputSlot(Inventory inv, int index, int x, int y) { super(inv, index, x, y); }
+
         @Override public boolean canInsert(ItemStack stack) { return false; }
+
         @Override
         public void onTakeItem(PlayerEntity player, ItemStack stack) {
+            // Called for regular clicks; shift-click (quickMove) is handled separately above.
             if (inventory instanceof CreatorBlockEntity be) be.onOutputTaken();
             super.onTakeItem(player, stack);
         }

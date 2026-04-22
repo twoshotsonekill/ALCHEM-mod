@@ -43,6 +43,7 @@ public class DynamicItem extends Item {
             return ActionResult.PASS;
         }
 
+        // Check remaining charges from custom NBT data
         NbtComponent nbtComp = stack.get(DataComponentTypes.CUSTOM_DATA);
         int charges = 0;
         if (nbtComp != null) {
@@ -51,7 +52,7 @@ public class DynamicItem extends Item {
 
         if (charges <= 0) {
             if (!world.isClient) {
-                user.sendMessage(Text.literal("This item has no charges remaining."), true);
+                user.sendMessage(Text.literal("§7This item has no charges remaining."), true);
             }
             return ActionResult.FAIL;
         }
@@ -67,19 +68,25 @@ public class DynamicItem extends Item {
             world.playSound(null, user.getX(), user.getY(), user.getZ(),
                     SoundEvents.BLOCK_BEACON_ACTIVATE, SoundCategory.PLAYERS, 0.6f, 1.4f);
 
+            // Decrement charges
             int newCharges = charges - 1;
             NbtCompound tag = nbtComp != null ? nbtComp.copyNbt() : new NbtCompound();
             tag.putInt("charges", newCharges);
             stack.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(tag));
 
+            // Notify player of remaining charges
             String chargeText = newCharges == 0
-                    ? "Last charge used!"
-                    : "Charges remaining: " + newCharges;
+                    ? "§cLast charge used!"
+                    : "§7Charges remaining: §f" + newCharges;
             user.sendMessage(Text.literal(chargeText), true);
         }
         return ActionResult.SUCCESS;
     }
 
+    /**
+     * Append charge count and effect info to the item tooltip so players
+     * know what the item does and how many uses remain.
+     */
     @Override
     public void appendTooltip(ItemStack stack, TooltipContext context, List<Text> tooltip, net.minecraft.item.tooltip.TooltipType type) {
         NbtComponent nbtComp = stack.get(DataComponentTypes.CUSTOM_DATA);
@@ -88,7 +95,7 @@ public class DynamicItem extends Item {
 
         String desc = tag.getString("creator_desc");
         if (!desc.isBlank()) {
-            tooltip.add(Text.literal(desc));
+            tooltip.add(Text.literal("§7" + desc));
         }
 
         String rarityLabel = tag.getString("creator_rarity");
@@ -115,24 +122,24 @@ public class DynamicItem extends Item {
         }
 
         int charges = tag.getInt("charges");
-        tooltip.add(Text.literal("Charges: " + charges));
+        tooltip.add(Text.literal("§8Charges: §f" + charges));
     }
 
     private static RegistryEntry<net.minecraft.entity.effect.StatusEffect> resolvePower(String effect) {
         return switch (effect.toLowerCase().replace("minecraft:", "").trim()) {
-            case "speed" -> StatusEffects.SPEED;
-            case "strength" -> StatusEffects.STRENGTH;
-            case "regeneration" -> StatusEffects.REGENERATION;
-            case "resistance" -> StatusEffects.RESISTANCE;
+            case "speed"           -> StatusEffects.SPEED;
+            case "strength"        -> StatusEffects.STRENGTH;
+            case "regeneration"    -> StatusEffects.REGENERATION;
+            case "resistance"      -> StatusEffects.RESISTANCE;
             case "fire_resistance" -> StatusEffects.FIRE_RESISTANCE;
-            case "night_vision" -> StatusEffects.NIGHT_VISION;
-            case "absorption" -> StatusEffects.ABSORPTION;
-            case "luck" -> StatusEffects.LUCK;
-            case "haste" -> StatusEffects.HASTE;
-            case "jump_boost" -> StatusEffects.JUMP_BOOST;
-            case "slow_falling" -> StatusEffects.SLOW_FALLING;
+            case "night_vision"    -> StatusEffects.NIGHT_VISION;
+            case "absorption"      -> StatusEffects.ABSORPTION;
+            case "luck"            -> StatusEffects.LUCK;
+            case "haste"           -> StatusEffects.HASTE;
+            case "jump_boost"      -> StatusEffects.JUMP_BOOST;
+            case "slow_falling"    -> StatusEffects.SLOW_FALLING;
             case "water_breathing" -> StatusEffects.WATER_BREATHING;
-            default -> null;
+            default                -> null;
         };
     }
 }
