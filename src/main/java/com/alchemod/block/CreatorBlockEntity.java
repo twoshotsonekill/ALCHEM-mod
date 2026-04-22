@@ -325,6 +325,15 @@ CREATIVE EXAMPLES:
         if (items.get(SLOT_A).isEmpty()) items.set(SLOT_A, ItemStack.EMPTY);
         if (items.get(SLOT_B).isEmpty()) items.set(SLOT_B, ItemStack.EMPTY);
 
+// Store input item IDs for texture generation (before consuming)
+        String inputA = Registries.ITEM.getId(items.get(SLOT_A).getItem()).toString();
+        String inputB = Registries.ITEM.getId(items.get(SLOT_B).getItem()).toString();
+
+        // Consume inputs
+        items.get(SLOT_A).decrement(1); items.get(SLOT_B).decrement(1);
+        if (items.get(SLOT_A).isEmpty()) items.set(SLOT_A, ItemStack.EMPTY);
+        if (items.get(SLOT_B).isEmpty()) items.set(SLOT_B, ItemStack.EMPTY);
+
         // Build output stack with full NBT
         ItemStack out = new ItemStack(dynItem);
         NbtCompound tag = new NbtCompound();
@@ -338,6 +347,8 @@ CREATIVE EXAMPLES:
         tag.putString("creator_mob_type",  r.mobType() != null ? r.mobType() : "");
         tag.putInt   ("creator_slot",      slot);
         tag.putInt   ("charges",           meta.startingCharges());
+        tag.putString("creator_input_a",   inputA);
+        tag.putString("creator_input_b",   inputB);
         out.set(net.minecraft.component.DataComponentTypes.CUSTOM_DATA,
                 net.minecraft.component.type.NbtComponent.of(tag));
 

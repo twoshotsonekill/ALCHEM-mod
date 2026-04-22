@@ -284,6 +284,21 @@ public class RuntimeTextureManager {
         return rarityColors[slot % rarityColors.length];
     }
 
+    /**
+     * Generate a fallback procedural texture when no input colors are available.
+     */
+    public static void generateFallback(int slot, Consumer<Identifier> onReady) {
+        if (LOADED.containsKey(slot)) {
+            onReady.accept(LOADED.get(slot));
+            return;
+        }
+        MinecraftClient.getInstance().execute(() -> {
+            Identifier id = generateFallbackTexture(slot);
+            LOADED.put(slot, id);
+            onReady.accept(id);
+        });
+    }
+
     private static String encodeUrl(String s) {
         try {
             return java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20");

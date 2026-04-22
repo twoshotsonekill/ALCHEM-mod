@@ -7,6 +7,7 @@ import com.alchemod.block.CreatorBlockEntity;
 import com.alchemod.block.ForgeBlock;
 import com.alchemod.block.ForgeBlockEntity;
 import com.alchemod.creator.DynamicItemRegistry;
+import com.alchemod.event.ItemAbilityEvents;
 import com.alchemod.screen.BuilderScreenHandler;
 import com.alchemod.screen.CreatorScreenHandler;
 import com.alchemod.screen.ForgeScreenHandler;
@@ -111,6 +112,7 @@ public class AlchemodInit implements ModInitializer {
                         .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "build_creator")))));
 
         DynamicItemRegistry.register();
+        ItemAbilityEvents.register();
 
         FORGE_BE_TYPE = Registry.register(Registries.BLOCK_ENTITY_TYPE,
                 Identifier.of(MOD_ID, "alchemical_forge"),
