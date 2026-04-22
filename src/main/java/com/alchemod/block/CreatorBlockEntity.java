@@ -4,8 +4,15 @@ import com.alchemod.AlchemodInit;
 import com.alchemod.creator.DynamicItem;
 import com.alchemod.creator.DynamicItemRegistry;
 import com.alchemod.screen.CreatorScreenHandler;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonSyntaxException;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.NbtComponent;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.inventory.Inventories;
@@ -31,24 +38,19 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
-public class CreatorBlockEntity extends BlockEntity
-        implements NamedScreenHandlerFactory, Inventory {
+public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandlerFactory, Inventory {
 
-    public static final int SLOT_A      = 0;
-    public static final int SLOT_B      = 1;
+    public static final int SLOT_A = 0;
+    public static final int SLOT_B = 1;
     public static final int SLOT_OUTPUT = 2;
 
-    public static final int STATE_IDLE       = 0;
+    public static final int STATE_IDLE = 0;
     public static final int STATE_PROCESSING = 1;
-    public static final int STATE_READY      = 2;
-    public static final int STATE_ERROR      = 3;
+    public static final int STATE_READY = 2;
+    public static final int STATE_ERROR = 3;
 
     private static final int MAX_PROGRESS = 100;
-
-    // ── Allowed values ────────────────────────────────────────────────────────
 
     private static final Set<String> VALID_EFFECTS = Set.of(
             "speed", "strength", "regeneration", "resistance",
@@ -65,38 +67,53 @@ public class CreatorBlockEntity extends BlockEntity
     private static final Set<String> VALID_ITEM_TYPES = Set.of(
             "use_item", "bow", "spawn_egg", "food", "sword", "totem", "throwable");
 
-    /** Mob IDs that can be safely spawned and modified at runtime. */
     private static final Set<String> VALID_MOBS = Set.of(
             "zombie", "skeleton", "creeper", "spider", "enderman", "blaze", "witch",
             "phantom", "slime", "magma_cube", "hoglin", "strider",
             "cow", "pig", "sheep", "chicken", "bat", "wolf",
             "rabbit", "fox", "bee", "axolotl", "parrot");
 
-    // ── State ─────────────────────────────────────────────────────────────────
+    private final DefaultedList<ItemStack> items = DefaultedList.ofSize(3, ItemStack.EMPTY);
 
-    private final DefaultedList<ItemStack> items =
-            DefaultedList.ofSize(3, ItemStack.EMPTY);
-
-    private int     state           = STATE_IDLE;
-    private int     progress        = 0;
-    private boolean aiPending       = false;
-    private int     lastCreatedSlot = -1;
+    private int state = STATE_IDLE;
+    private int progress = 0;
+    private boolean aiPending = false;
+    private int lastCreatedSlot = -1;
+    private boolean behaviorCodeEnabled = true;
 
     private final PropertyDelegate delegate = new PropertyDelegate() {
-        @Override public int get(int i) {
-            return switch (i) { case 0 -> state; case 1 -> progress; case 2 -> lastCreatedSlot; default -> 0; };
+        @Override
+        public int get(int index) {
+            return switch (index) {
+                case 0 -> state;
+                case 1 -> progress;
+                case 2 -> lastCreatedSlot;
+                case 3 -> behaviorCodeEnabled ? 1 : 0;
+                default -> 0;
+            };
         }
-        @Override public void set(int i, int v) {
-            switch (i) { case 0 -> state = v; case 1 -> progress = v; case 2 -> lastCreatedSlot = v; }
+
+        @Override
+        public void set(int index, int value) {
+            switch (index) {
+                case 0 -> state = value;
+                case 1 -> progress = value;
+                case 2 -> lastCreatedSlot = value;
+                case 3 -> behaviorCodeEnabled = value != 0;
+                default -> {
+                }
+            }
         }
-        @Override public int size() { return 3; }
+
+        @Override
+        public int size() {
+            return 4;
+        }
     };
 
     public CreatorBlockEntity(BlockPos pos, BlockState state) {
         super(AlchemodInit.CREATOR_BE_TYPE, pos, state);
     }
-
-    // ── Server tick ───────────────────────────────────────────────────────────
 
     public void serverTick(World world, BlockPos pos) {
         if (state == STATE_IDLE
@@ -106,366 +123,639 @@ public class CreatorBlockEntity extends BlockEntity
                 && !aiPending) {
             startCreation(world);
         }
+
         if (state == STATE_PROCESSING) {
             progress = Math.min(progress + 1, MAX_PROGRESS - 1);
             markDirty();
         }
     }
 
-    // ── Start AI creation ─────────────────────────────────────────────────────
+    public void setBehaviorCodeEnabled(boolean enabled) {
+        behaviorCodeEnabled = enabled;
+        markDirty();
+    }
+
+    public boolean isBehaviorCodeEnabled() {
+        return behaviorCodeEnabled;
+    }
 
     private void startCreation(World world) {
         aiPending = true;
-        state     = STATE_PROCESSING;
-        progress  = 0;
+        state = STATE_PROCESSING;
+        progress = 0;
         markDirty();
 
-        String itemA = items.get(SLOT_A).getName().getString()
-                + " (" + Registries.ITEM.getId(items.get(SLOT_A).getItem()) + ")";
-        String itemB = items.get(SLOT_B).getName().getString()
-                + " (" + Registries.ITEM.getId(items.get(SLOT_B).getItem()) + ")";
+        ItemStack inputA = items.get(SLOT_A);
+        ItemStack inputB = items.get(SLOT_B);
+        String itemA = inputA.getName().getString() + " (" + Registries.ITEM.getId(inputA.getItem()) + ")";
+        String itemB = inputB.getName().getString() + " (" + Registries.ITEM.getId(inputB.getItem()) + ")";
+        String inputIdA = Registries.ITEM.getId(inputA.getItem()).toString();
+        String inputIdB = Registries.ITEM.getId(inputB.getItem()).toString();
+        boolean allowBehaviorCode = behaviorCodeEnabled;
 
-        AlchemodInit.LOG.info("[Creator] Inventing from: {} + {}", itemA, itemB);
+        AlchemodInit.LOG.info("[Creator] Inventing from {} + {} (scripted={})", itemA, itemB, allowBehaviorCode);
 
-        CompletableFuture.supplyAsync(() -> queryOpenRouter(itemA, itemB))
+        CompletableFuture.supplyAsync(() -> queryOpenRouter(itemA, itemB, allowBehaviorCode))
                 .thenAccept(result -> {
                     if (world.getServer() != null) {
-                        world.getServer().execute(() -> applyResult(result));
+                        world.getServer().execute(() -> applyResult(result, inputIdA, inputIdB));
                     }
                 });
     }
 
-    // ── OpenRouter call ───────────────────────────────────────────────────────
-
-    private CreationResult queryOpenRouter(String itemA, String itemB) {
+    private CreationResult queryOpenRouter(String itemA, String itemB, boolean allowBehaviorCode) {
         String key = AlchemodInit.OPENROUTER_KEY;
-        if (key.isBlank()) return CreationResult.error("OPENROUTER_API_KEY not set");
+        if (key.isBlank()) {
+            return CreationResult.error("OPENROUTER_API_KEY not set");
+        }
 
-        String system = """
-You are a creative Minecraft alchemist inventing wildly imaginative NEW items.
-Given two input items, invent a magical synthesis that could be any kind of item.
-
-=== ITEM TYPES ===
-Choose item_type based purely on what the combination SUGGESTS. Be creative!
-
-  use_item   – instant right-click ability (potions, wands, orbs)
-  bow        – hold to charge, fire a magical projectile
-               → Use when inputs include: bow, arrow, crossbow, string, feather, blaze rod
-  spawn_egg  – summons a magical creature when right-clicked on ground
-               → Use when inputs include: any spawn egg, mob drops (bone, slimeball, spider eye,
-                 feather, leather, wool), monster-related items, seeds/crops + mob items
-  food       – hold right-click to eat and gain powerful effects
-               → Use when inputs include: any food, apple, bread, melon, carrot, fish, cake
-  sword      – right-click to sweep nearby enemies with magical damage
-               → Use when inputs include: sword, axe, trident, combat items
-  totem      – hold in off-hand for persistent passive effects on you and nearby allies
-               → Use when inputs include: totem, shield, armor, pearl, beacon, conduit
-  throwable  – throw at a target point for area explosion/effects
-               → Use when inputs include: snowball, egg, ender pearl, fireball, bomb-like items
-
-=== RARITY GUIDE ===
-  common    – mundane pairing, one weak effect
-  uncommon  – mildly interesting, two effects
-  rare      – creative/thematic match, good effects + special ability
-  epic      – powerful/lore-rich combination, multiple effects + strong special
-  legendary – world-altering or iconic combination, maximum effects + overpowered special
-
-=== VALID EFFECTS (use exact strings) ===
-speed, strength, regeneration, resistance, fire_resistance, night_vision,
-absorption, luck, haste, jump_boost, slow_falling, water_breathing
-
-Effects count by rarity: common=1, uncommon=2, rare=2, epic=3, legendary=4
-
-=== VALID SPECIALS ===
-ignite, knockback, heal_aura, launch, freeze, drain, phase, lightning, void_step
-Required for rare/epic/legendary. Set to null for common. Optional for uncommon.
-
-=== VALID MOBS (spawn_egg only) ===
-zombie, skeleton, creeper, spider, enderman, blaze, witch,
-phantom, slime, magma_cube, bat, cow, pig, sheep, chicken,
-wolf, rabbit, fox, bee, axolotl, parrot
-
-=== OUTPUT FORMAT ===
-Respond with ONLY valid JSON, no markdown, no explanation:
-{"name":"Item Name","description":"One sentence flavour.","sprite_prompt":"pixel art description 8-15 words","rarity":"rare","item_type":"bow","effects":["strength","haste"],"special":"ignite","mob_type":null}
-
-mob_type: for spawn_egg ONLY — a string from the mob list above. null for everything else.
-
-CREATIVE EXAMPLES:
-- Bow + Blaze Rod → {"name":"Inferno Bow","item_type":"bow","special":"ignite","rarity":"rare",...}
-- Melon + Phantom Membrane → {"name":"Flying Melon Egg","item_type":"spawn_egg","mob_type":"phantom","special":"launch","rarity":"uncommon",...}
-- Golden Apple + Nether Star → {"name":"Divine Fruit","item_type":"food","special":"heal_aura","rarity":"legendary",...}
-- Ender Pearl + Snowball → {"name":"Freeze Pearl","item_type":"throwable","special":"freeze","rarity":"rare",...}
-- Diamond Sword + Fire Charge → {"name":"Blazing Blade","item_type":"sword","special":"ignite","rarity":"epic",...}
-- Totem of Undying + Emerald → {"name":"Eternal Emerald","item_type":"totem","special":"heal_aura","rarity":"epic",...}
-""";
-
-        String user = "Create a new item by combining: " + itemA + " + " + itemB;
-
+        String system = buildSystemPrompt(allowBehaviorCode);
+        String user = "Create a new magical item by combining: " + itemA + " + " + itemB;
         String body = "{"
                 + "\"model\":\"openai/gpt-4o-mini\","
-                + "\"max_tokens\":220,"
+                + "\"max_tokens\":" + (allowBehaviorCode ? 850 : 260) + ","
                 + "\"messages\":["
                 + "{\"role\":\"system\",\"content\":" + quoted(system) + "},"
                 + "{\"role\":\"user\",\"content\":" + quoted(user) + "}"
                 + "]}";
 
         try {
-            HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-            HttpRequest req = HttpRequest.newBuilder()
+            HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(10))
+                    .build();
+            HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create("https://openrouter.ai/api/v1/chat/completions"))
                     .header("Content-Type", "application/json")
                     .header("Authorization", "Bearer " + key)
                     .header("HTTP-Referer", "https://github.com/alchemod")
+                    .timeout(Duration.ofSeconds(30))
                     .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .timeout(Duration.ofSeconds(25))
                     .build();
 
-            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
-            AlchemodInit.LOG.info("[Creator] API response: {}", resp.body());
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                return CreationResult.error("HTTP " + response.statusCode());
+            }
 
-            if (resp.statusCode() != 200) return CreationResult.error("HTTP " + resp.statusCode());
-
-            return parseCreationResult(resp.body());
-
+            return parseCreationResult(response.body(), allowBehaviorCode);
         } catch (Exception e) {
             AlchemodInit.LOG.error("[Creator] API error", e);
             return CreationResult.error(e.getMessage());
         }
     }
 
-    // ── Parse AI JSON response ────────────────────────────────────────────────
+    private String buildSystemPrompt(boolean allowBehaviorCode) {
+        String basePrompt = """
+You are a creative Minecraft alchemist inventing imaginative new items.
+Return ONLY valid JSON with these fields:
+{
+  "name": "Item Name",
+  "description": "One sentence flavour text.",
+  "sprite_prompt": "8-15 word pixel art prompt",
+  "rarity": "common|uncommon|rare|epic|legendary",
+  "item_type": "use_item|bow|spawn_egg|food|sword|totem|throwable",
+  "effects": ["speed"],
+  "special": "ignite|null",
+  "mob_type": "bat|null",
+  "behavior_script": null
+}
 
-    private CreationResult parseCreationResult(String json) {
-        // Unwrap OpenRouter outer envelope
-        Pattern contentPat = Pattern.compile("\"content\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
-        Matcher cm = contentPat.matcher(json);
-        String content = cm.find()
-                ? cm.group(1).replace("\\n", "\n").replace("\\\"", "\"").replace("\\/", "/")
-                : json;
+Rules:
+- Valid effects only: speed, strength, regeneration, resistance, fire_resistance, night_vision, absorption, luck, haste, jump_boost, slow_falling, water_breathing
+- Valid specials only: ignite, knockback, heal_aura, launch, freeze, drain, phase, lightning, void_step
+- Valid spawn mobs only: zombie, skeleton, creeper, spider, enderman, blaze, witch, phantom, slime, magma_cube, hoglin, strider, cow, pig, sheep, chicken, bat, wolf, rabbit, fox, bee, axolotl, parrot
+- common gets 1 effect, uncommon and rare get 2, epic gets 3, legendary gets 4
+- rare, epic, and legendary should always have a special
+- if item_type is not spawn_egg, mob_type must be null
+- behavior_script must be null when scripting is disabled
+""";
 
-        String       name     = extractStr(content, "name");
-        String       desc     = extractStr(content, "description");
-        String       sprite   = extractStr(content, "sprite_prompt");
-        String       rarity   = extractStr(content, "rarity");
-        String       itemType = extractStr(content, "item_type");
-        List<String> effects  = extractArray(content, "effects");
-        String       special  = extractStrNullable(content, "special");
-        String       mobType  = extractStrNullable(content, "mob_type");
+        if (!allowBehaviorCode) {
+            return basePrompt + """
 
-        // ── Defaults ─────────────────────────────────────────────────────────
-
-        if (isBlank(name))     name     = "Mysterious Relic";
-        if (isBlank(desc))     desc     = "An enigmatic object of unknown power.";
-        if (isBlank(sprite))   sprite   = name + " magical glowing artifact";
-
-        rarity   = VALID_RARITIES.contains(normalise(rarity))   ? normalise(rarity)   : "common";
-        itemType = VALID_ITEM_TYPES.contains(normalise(itemType)) ? normalise(itemType) : "use_item";
-
-        // Validate effects
-        List<String> cleanEffects = effects.stream()
-                .map(this::normalise)
-                .filter(VALID_EFFECTS::contains)
-                .toList();
-        if (cleanEffects.isEmpty()) cleanEffects = List.of("luck");
-
-        // Cap effects to rarity max
-        int maxEff = switch (rarity) { case "uncommon", "rare" -> 2; case "epic" -> 3; case "legendary" -> 4; default -> 1; };
-        if (cleanEffects.size() > maxEff) cleanEffects = cleanEffects.subList(0, maxEff);
-
-        // Validate special
-        if (special != null) {
-            special = normalise(special);
-            if (!VALID_SPECIALS.contains(special)) special = null;
-        }
-        // Guarantee rare+ have a special
-        if (special == null && Set.of("rare", "epic", "legendary").contains(rarity)) {
-            special = fallbackSpecial(cleanEffects.get(0));
+Scripting is disabled for this creation.
+Set "behavior_script" to null and focus on metadata only.
+""";
         }
 
-        // Validate mob_type — only meaningful for spawn_egg
-        if (!"spawn_egg".equals(itemType)) {
-            mobType = null;
-        } else {
-            if (mobType != null) mobType = normalise(mobType);
-            if (!VALID_MOBS.contains(mobType)) mobType = "bat"; // safe default
-        }
+        return basePrompt + """
 
-        AlchemodInit.LOG.info("[Creator] Parsed — '{}' type={} rarity={} effects={} special={} mob={}",
-                name, itemType, rarity, cleanEffects, special, mobType);
+Scripting is enabled for this creation.
+Generate a sandboxed JavaScript function in "behavior_script" that defines what happens on right click.
 
-        return new CreationResult(name, desc, sprite, rarity, itemType, cleanEffects, special, mobType, null);
+The script must define:
+function onUse(player, world) { ... }
+
+Available API:
+- player.heal(amount)
+- player.damage(amount)
+- player.addEffect(name, ticks, level)
+- player.removeEffect(name)
+- player.addVelocity(x, y, z)
+- player.teleport(x, y, z)
+- player.setOnFire(seconds)
+- player.extinguish()
+- player.sendMessage("Text")
+- player.getX(), player.getY(), player.getZ(), player.getHealth(), player.getLookDir(), player.isSneaking(), player.isInWater()
+- world.createExplosion(x, y, z, power, fire)
+- world.spawnLightning(x, y, z)
+- world.playSound(soundId, volume, pitch)
+- world.setBlock(x, y, z, blockId)
+- world.isDay(), world.isRaining(), world.getTime()
+- nearbyEntities(radius) returning entities with damage, heal, knockbackFrom, setVelocity, addEffect, setOnFire, extinguish, getHealth, getX, getY, getZ, getType, isPlayer, isAlive
+- log(message)
+
+Script rules:
+- return a JSON escaped single string value
+- make the script unique to the ingredients
+- keep it under 20 lines
+- use player.sendMessage for feedback
+- stay thematic with rarity, effects, and special
+""";
     }
 
-    // ── Apply result on server thread ─────────────────────────────────────────
+    private CreationResult parseCreationResult(String apiBody, boolean allowBehaviorCode) {
+        try {
+            String content = extractContent(apiBody);
+            String jsonBody = extractFirstJsonObject(stripCodeFence(content != null ? content : apiBody));
+            if (jsonBody == null) {
+                return CreationResult.error("Could not parse AI response");
+            }
 
-    private void applyResult(CreationResult r) {
+            JsonObject object = JsonParser.parseString(jsonBody).getAsJsonObject();
+            String name = getString(object, "name", "Mysterious Relic");
+            String description = getString(object, "description", "An enigmatic object of unknown power.");
+            String spritePrompt = getString(object, "sprite_prompt", name + " magical glowing artifact");
+            String rarity = normalise(getString(object, "rarity", "common"));
+            String itemType = normalise(getString(object, "item_type", "use_item"));
+            List<String> effects = sanitiseEffects(getStringList(object, "effects"));
+            String special = sanitiseSpecial(getNullableString(object, "special"));
+            String mobType = sanitiseMobType(itemType, getNullableString(object, "mob_type"));
+            String behaviorScript = allowBehaviorCode ? getNullableString(object, "behavior_script") : null;
+
+            if (!VALID_RARITIES.contains(rarity)) {
+                rarity = "common";
+            }
+
+            if (!VALID_ITEM_TYPES.contains(itemType)) {
+                itemType = "use_item";
+            }
+
+            int maxEffects = switch (rarity) {
+                case "uncommon", "rare" -> 2;
+                case "epic" -> 3;
+                case "legendary" -> 4;
+                default -> 1;
+            };
+
+            if (effects.isEmpty()) {
+                effects = List.of("luck");
+            } else if (effects.size() > maxEffects) {
+                effects = effects.subList(0, maxEffects);
+            }
+
+            if (special == null && Set.of("rare", "epic", "legendary").contains(rarity)) {
+                special = fallbackSpecial(effects.get(0));
+            }
+
+            if (allowBehaviorCode && (behaviorScript == null || behaviorScript.isBlank())) {
+                behaviorScript = buildFallbackScript(name, rarity, effects, special);
+            }
+
+            return new CreationResult(
+                    name,
+                    description,
+                    spritePrompt,
+                    rarity,
+                    itemType,
+                    effects,
+                    special,
+                    mobType,
+                    behaviorScript,
+                    null);
+        } catch (JsonSyntaxException | IllegalStateException e) {
+            AlchemodInit.LOG.warn("[Creator] Failed to parse AI JSON: {}", e.getMessage());
+            return CreationResult.error("Invalid AI JSON");
+        }
+    }
+
+    private List<String> sanitiseEffects(List<String> inputEffects) {
+        List<String> cleanEffects = new ArrayList<>();
+        for (String effect : inputEffects) {
+            String normalised = normalise(effect);
+            if (VALID_EFFECTS.contains(normalised) && !cleanEffects.contains(normalised)) {
+                cleanEffects.add(normalised);
+            }
+        }
+        return cleanEffects;
+    }
+
+    private String sanitiseSpecial(String value) {
+        if (value == null) {
+            return null;
+        }
+
+        String normalised = normalise(value);
+        return VALID_SPECIALS.contains(normalised) ? normalised : null;
+    }
+
+    private String sanitiseMobType(String itemType, String value) {
+        if (!"spawn_egg".equals(itemType)) {
+            return null;
+        }
+
+        String normalised = normalise(value);
+        return VALID_MOBS.contains(normalised) ? normalised : "bat";
+    }
+
+    private void applyResult(CreationResult result, String inputIdA, String inputIdB) {
         aiPending = false;
 
-        if (r.error() != null) {
-            AlchemodInit.LOG.warn("[Creator] Error: {}", r.error());
-            state = STATE_ERROR; progress = 0; markDirty(); return;
+        if (result.error() != null) {
+            state = STATE_ERROR;
+            progress = 0;
+            markDirty();
+            return;
         }
 
-        DynamicItem dynItem = DynamicItemRegistry.claimSlot();
-        if (dynItem == null) {
-            AlchemodInit.LOG.warn("[Creator] No dynamic slots left!");
-            state = STATE_ERROR; markDirty(); return;
+        DynamicItem dynamicItem = DynamicItemRegistry.claimSlot();
+        if (dynamicItem == null) {
+            state = STATE_ERROR;
+            markDirty();
+            return;
         }
 
-        int slot = dynItem.getSlotIndex();
-        DynamicItemRegistry.CreatedItemMeta meta =
-                new DynamicItemRegistry.CreatedItemMeta(
-                        r.name(), r.description(), slot, r.rarity(),
-                        r.itemType(), r.effects(), r.special(), r.mobType());
-        DynamicItemRegistry.updateSlotMeta(slot, meta);
+        int claimedSlot = dynamicItem.getSlotIndex();
+        DynamicItemRegistry.CreatedItemMeta meta = new DynamicItemRegistry.CreatedItemMeta(
+                result.name(),
+                result.description(),
+                claimedSlot,
+                result.rarity(),
+                result.itemType(),
+                result.effects(),
+                result.special(),
+                result.mobType(),
+                result.behaviorScript());
+        DynamicItemRegistry.updateSlotMeta(claimedSlot, meta);
 
-        // Consume inputs
-        items.get(SLOT_A).decrement(1); items.get(SLOT_B).decrement(1);
-        if (items.get(SLOT_A).isEmpty()) items.set(SLOT_A, ItemStack.EMPTY);
-        if (items.get(SLOT_B).isEmpty()) items.set(SLOT_B, ItemStack.EMPTY);
+        items.get(SLOT_A).decrement(1);
+        items.get(SLOT_B).decrement(1);
+        if (items.get(SLOT_A).isEmpty()) {
+            items.set(SLOT_A, ItemStack.EMPTY);
+        }
+        if (items.get(SLOT_B).isEmpty()) {
+            items.set(SLOT_B, ItemStack.EMPTY);
+        }
 
-// Store input item IDs for texture generation (before consuming)
-        String inputA = Registries.ITEM.getId(items.get(SLOT_A).getItem()).toString();
-        String inputB = Registries.ITEM.getId(items.get(SLOT_B).getItem()).toString();
-
-        // Consume inputs
-        items.get(SLOT_A).decrement(1); items.get(SLOT_B).decrement(1);
-        if (items.get(SLOT_A).isEmpty()) items.set(SLOT_A, ItemStack.EMPTY);
-        if (items.get(SLOT_B).isEmpty()) items.set(SLOT_B, ItemStack.EMPTY);
-
-        // Build output stack with full NBT
-        ItemStack out = new ItemStack(dynItem);
+        ItemStack output = new ItemStack(dynamicItem);
         NbtCompound tag = new NbtCompound();
-        tag.putString("creator_name",      r.name());
-        tag.putString("creator_desc",      r.description());
-        tag.putString("creator_sprite",    r.spritePrompt());
-        tag.putString("creator_rarity",    r.rarity());
-        tag.putString("creator_item_type", r.itemType());
-        tag.putString("creator_effects",   String.join(",", r.effects()));
-        tag.putString("creator_special",   r.special() != null ? r.special() : "");
-        tag.putString("creator_mob_type",  r.mobType() != null ? r.mobType() : "");
-        tag.putInt   ("creator_slot",      slot);
-        tag.putInt   ("charges",           meta.startingCharges());
-        tag.putString("creator_input_a",   inputA);
-        tag.putString("creator_input_b",   inputB);
-        out.set(net.minecraft.component.DataComponentTypes.CUSTOM_DATA,
-                net.minecraft.component.type.NbtComponent.of(tag));
+        tag.putString("creator_name", result.name());
+        tag.putString("creator_desc", result.description());
+        tag.putString("creator_sprite", result.spritePrompt());
+        tag.putString("creator_rarity", result.rarity());
+        tag.putString("creator_item_type", result.itemType());
+        tag.putString("creator_effects", String.join(",", result.effects()));
+        tag.putString("creator_special", result.special() != null ? result.special() : "");
+        tag.putString("creator_mob_type", result.mobType() != null ? result.mobType() : "");
+        tag.putInt("creator_slot", claimedSlot);
+        tag.putInt("charges", meta.startingCharges());
+        tag.putString("creator_input_a", inputIdA);
+        tag.putString("creator_input_b", inputIdB);
+        if (result.behaviorScript() != null && !result.behaviorScript().isBlank()) {
+            tag.putString("creator_script", result.behaviorScript());
+        }
+        output.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(tag));
 
-        items.set(SLOT_OUTPUT, out);
-        lastCreatedSlot = slot;
+        items.set(SLOT_OUTPUT, output);
+        lastCreatedSlot = claimedSlot;
         progress = MAX_PROGRESS;
-        state    = STATE_READY;
-        AlchemodInit.LOG.info("[Creator] Created '{}' (type={} rarity={}) slot {}",
-                r.name(), r.itemType(), r.rarity(), slot);
+        state = STATE_READY;
         markDirty();
     }
 
-    public void onOutputTaken() { state = STATE_IDLE; progress = 0; markDirty(); }
-
-    // ── Parsing helpers ───────────────────────────────────────────────────────
-
-    private String extractStr(String json, String key) {
-        Matcher m = Pattern.compile("\"" + key + "\"\\s*:\\s*\"([^\"]+)\"").matcher(json);
-        return m.find() ? m.group(1).trim() : null;
+    public void onOutputTaken() {
+        state = STATE_IDLE;
+        progress = 0;
+        markDirty();
     }
 
-    private String extractStrNullable(String json, String key) {
-        if (Pattern.compile("\"" + key + "\"\\s*:\\s*null").matcher(json).find()) return null;
-        return extractStr(json, key);
+    public PropertyDelegate getDelegate() {
+        return delegate;
     }
 
-    private List<String> extractArray(String json, String key) {
-        List<String> result = new ArrayList<>();
-        try {
-            Matcher am = Pattern.compile("\"" + key + "\"\\s*:\\s*\\[([^\\]]*?)]").matcher(json);
-            if (!am.find()) return result;
-            Matcher im = Pattern.compile("\"([^\"]+)\"").matcher(am.group(1));
-            while (im.find()) result.add(im.group(1).trim());
-        } catch (Exception e) {
-            AlchemodInit.LOG.warn("[Creator] Array parse error for '{}': {}", key, e.getMessage());
+    public int getMaxProgress() {
+        return MAX_PROGRESS;
+    }
+
+    public DefaultedList<ItemStack> getItems() {
+        return items;
+    }
+
+    @Override
+    public ScreenHandler createMenu(int syncId, PlayerInventory inventory, PlayerEntity player) {
+        return new CreatorScreenHandler(syncId, inventory, this, delegate, getPos());
+    }
+
+    @Override
+    public Text getDisplayName() {
+        return Text.translatable("block.alchemod.item_creator");
+    }
+
+    @Override
+    public int size() {
+        return 3;
+    }
+
+    @Override
+    public boolean isEmpty() {
+        return items.stream().allMatch(ItemStack::isEmpty);
+    }
+
+    @Override
+    public ItemStack getStack(int slot) {
+        return items.get(slot);
+    }
+
+    @Override
+    public ItemStack removeStack(int slot, int amount) {
+        ItemStack result = Inventories.splitStack(items, slot, amount);
+        if (!result.isEmpty()) {
+            markDirty();
         }
         return result;
     }
 
-    private String normalise(String s) {
-        return s == null ? "" : s.toLowerCase().replace("minecraft:", "").trim();
+    @Override
+    public ItemStack removeStack(int slot) {
+        return Inventories.removeStack(items, slot);
     }
 
-    private boolean isBlank(String s) { return s == null || s.isBlank(); }
+    @Override
+    public void setStack(int slot, ItemStack stack) {
+        items.set(slot, stack);
+        markDirty();
+    }
+
+    @Override
+    public boolean canPlayerUse(PlayerEntity player) {
+        return Inventory.canPlayerUse(this, player);
+    }
+
+    @Override
+    public void clear() {
+        items.clear();
+    }
+
+    @Override
+    protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
+        super.writeNbt(nbt, lookup);
+        Inventories.writeNbt(nbt, items, lookup);
+        nbt.putInt("State", state);
+        nbt.putInt("Progress", progress);
+        nbt.putInt("LastSlot", lastCreatedSlot);
+        nbt.putBoolean("BehaviorCodeEnabled", behaviorCodeEnabled);
+    }
+
+    @Override
+    protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
+        super.readNbt(nbt, lookup);
+        Inventories.readNbt(nbt, items, lookup);
+        state = nbt.getInt("State");
+        progress = nbt.getInt("Progress");
+        lastCreatedSlot = nbt.getInt("LastSlot");
+        behaviorCodeEnabled = nbt.getBoolean("BehaviorCodeEnabled");
+        if (state == STATE_PROCESSING) {
+            state = STATE_IDLE;
+            progress = 0;
+        }
+    }
+
+    private static String extractContent(String apiBody) {
+        try {
+            JsonObject root = JsonParser.parseString(apiBody).getAsJsonObject();
+            JsonArray choices = root.getAsJsonArray("choices");
+            if (choices == null || choices.size() == 0) {
+                return apiBody;
+            }
+
+            JsonObject message = choices.get(0).getAsJsonObject().getAsJsonObject("message");
+            if (message == null) {
+                return apiBody;
+            }
+
+            JsonElement content = message.get("content");
+            if (content == null || content.isJsonNull()) {
+                return apiBody;
+            }
+
+            if (content.isJsonPrimitive()) {
+                return content.getAsString();
+            }
+
+            if (content.isJsonArray()) {
+                StringBuilder builder = new StringBuilder();
+                for (JsonElement element : content.getAsJsonArray()) {
+                    JsonObject part = element.getAsJsonObject();
+                    if (part.has("text")) {
+                        builder.append(part.get("text").getAsString());
+                    }
+                }
+                return builder.toString();
+            }
+        } catch (Exception ignored) {
+        }
+
+        return apiBody;
+    }
+
+    private static String stripCodeFence(String value) {
+        String trimmed = value == null ? "" : value.trim();
+        if (!trimmed.startsWith("```")) {
+            return trimmed;
+        }
+
+        int firstLine = trimmed.indexOf('\n');
+        int lastFence = trimmed.lastIndexOf("```");
+        if (firstLine < 0 || lastFence <= firstLine) {
+            return trimmed.replace("```", "").trim();
+        }
+
+        return trimmed.substring(firstLine + 1, lastFence).trim();
+    }
+
+    private static String extractFirstJsonObject(String content) {
+        int start = -1;
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+
+        for (int index = 0; index < content.length(); index++) {
+            char current = content.charAt(index);
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+
+            if (current == '\\') {
+                escaped = true;
+                continue;
+            }
+
+            if (current == '"') {
+                inString = !inString;
+                continue;
+            }
+
+            if (inString) {
+                continue;
+            }
+
+            if (current == '{') {
+                if (depth == 0) {
+                    start = index;
+                }
+                depth++;
+            } else if (current == '}') {
+                depth--;
+                if (depth == 0 && start >= 0) {
+                    return content.substring(start, index + 1);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static String getString(JsonObject object, String key, String fallback) {
+        JsonElement element = object.get(key);
+        return element != null && !element.isJsonNull() ? element.getAsString().trim() : fallback;
+    }
+
+    private static String getNullableString(JsonObject object, String key) {
+        JsonElement element = object.get(key);
+        if (element == null || element.isJsonNull()) {
+            return null;
+        }
+        String value = element.getAsString().trim();
+        return value.isBlank() || "null".equalsIgnoreCase(value) ? null : value;
+    }
+
+    private static List<String> getStringList(JsonObject object, String key) {
+        JsonElement element = object.get(key);
+        if (element == null || !element.isJsonArray()) {
+            return List.of();
+        }
+
+        List<String> values = new ArrayList<>();
+        for (JsonElement item : element.getAsJsonArray()) {
+            if (item != null && !item.isJsonNull()) {
+                values.add(item.getAsString());
+            }
+        }
+        return values;
+    }
+
+    private static String normalise(String value) {
+        return value == null ? "" : value.toLowerCase().replace("minecraft:", "").trim();
+    }
 
     private static String fallbackSpecial(String effect) {
         return switch (effect) {
-            case "strength"        -> "knockback";
-            case "speed"           -> "void_step";
-            case "regeneration"    -> "heal_aura";
-            case "jump_boost"      -> "launch";
+            case "strength" -> "knockback";
+            case "speed" -> "void_step";
+            case "regeneration" -> "heal_aura";
+            case "jump_boost" -> "launch";
             case "fire_resistance" -> "ignite";
-            case "night_vision"    -> "phase";
+            case "night_vision" -> "phase";
             case "water_breathing" -> "freeze";
-            case "haste"           -> "lightning";
-            default                -> "drain";
+            case "haste" -> "lightning";
+            default -> "drain";
         };
     }
 
-    // ── Accessors ─────────────────────────────────────────────────────────────
+    private static String buildFallbackScript(String name, String rarity, List<String> effects, String special) {
+        int duration = switch (rarity) {
+            case "uncommon" -> 240;
+            case "rare" -> 320;
+            case "epic" -> 420;
+            case "legendary" -> 520;
+            default -> 180;
+        };
+        int amplifier = switch (rarity) {
+            case "rare" -> 1;
+            case "epic", "legendary" -> 2;
+            default -> 0;
+        };
 
-    public PropertyDelegate getDelegate()            { return delegate; }
-    public int getMaxProgress()                      { return MAX_PROGRESS; }
-    public DefaultedList<ItemStack> getItems()       { return items; }
+        StringBuilder builder = new StringBuilder();
+        builder.append("function onUse(player, world) {\n");
+        for (String effect : effects) {
+            builder.append("  player.addEffect('")
+                    .append(effect)
+                    .append("', ")
+                    .append(duration)
+                    .append(", ")
+                    .append(amplifier)
+                    .append(");\n");
+        }
 
-    // ── NamedScreenHandlerFactory ─────────────────────────────────────────────
+        if (special != null) {
+            switch (special) {
+                case "ignite" -> builder.append("  var targets = nearbyEntities(6);\n")
+                        .append("  for (var i = 0; i < targets.length; i++) { targets[i].setOnFire(6); }\n");
+                case "knockback" -> builder.append("  var targets = nearbyEntities(6);\n")
+                        .append("  for (var i = 0; i < targets.length; i++) { targets[i].knockbackFrom(3); }\n");
+                case "heal_aura" -> builder.append("  player.heal(6);\n");
+                case "launch" -> builder.append("  player.addVelocity(0, 1.2, 0);\n");
+                case "freeze" -> builder.append("  var targets = nearbyEntities(7);\n")
+                        .append("  for (var i = 0; i < targets.length; i++) { targets[i].addEffect('slowness', 180, 2); }\n");
+                case "drain" -> builder.append("  var targets = nearbyEntities(7);\n")
+                        .append("  for (var i = 0; i < targets.length; i++) { targets[i].damage(5); }\n")
+                        .append("  player.heal(4);\n");
+                case "phase" -> builder.append("  player.addEffect('invisibility', 160, 0);\n");
+                case "lightning" -> builder.append("  var targets = nearbyEntities(8);\n")
+                        .append("  for (var i = 0; i < targets.length; i++) { world.spawnLightning(targets[i].getX(), targets[i].getY(), targets[i].getZ()); }\n");
+                case "void_step" -> builder.append("  player.addEffect('slow_falling', 200, 0);\n")
+                        .append("  player.addVelocity(0, 0.8, 0);\n");
+                default -> {
+                }
+            }
+        }
 
-    @Override public ScreenHandler createMenu(int syncId, PlayerInventory inv, PlayerEntity player) {
-        return new CreatorScreenHandler(syncId, inv, this, delegate);
+        builder.append("  player.sendMessage('")
+                .append(escapeForSingleQuotedScript(name))
+                .append(" awakens.');\n");
+        builder.append("  world.playSound('block.beacon.activate', 0.7, 1.2);\n");
+        builder.append("}\n");
+        return builder.toString();
     }
-    @Override public Text getDisplayName() {
-        return Text.translatable("block.alchemod.item_creator");
+
+    private static String escapeForSingleQuotedScript(String value) {
+        return value.replace("\\", "\\\\").replace("'", "\\'");
     }
 
-    // ── Inventory ─────────────────────────────────────────────────────────────
-
-    @Override public int size()       { return 3; }
-    @Override public boolean isEmpty(){ return items.stream().allMatch(ItemStack::isEmpty); }
-    @Override public ItemStack getStack(int slot)           { return items.get(slot); }
-    @Override public ItemStack removeStack(int slot, int amount) {
-        ItemStack r = Inventories.splitStack(items, slot, amount);
-        if (!r.isEmpty()) markDirty(); return r;
+    private static String quoted(String value) {
+        return "\"" + value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "") + "\"";
     }
-    @Override public ItemStack removeStack(int slot)        { return Inventories.removeStack(items, slot); }
-    @Override public void setStack(int slot, ItemStack stack){ items.set(slot, stack); markDirty(); }
-    @Override public boolean canPlayerUse(PlayerEntity p)   { return net.minecraft.inventory.Inventory.canPlayerUse(this, p); }
-    @Override public void clear()                           { items.clear(); }
-
-    // ── NBT ───────────────────────────────────────────────────────────────────
-
-    @Override protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
-        super.writeNbt(nbt, lookup);
-        Inventories.writeNbt(nbt, items, lookup);
-        nbt.putInt("State", state); nbt.putInt("Progress", progress); nbt.putInt("LastSlot", lastCreatedSlot);
-    }
-    @Override protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
-        super.readNbt(nbt, lookup);
-        Inventories.readNbt(nbt, items, lookup);
-        state = nbt.getInt("State"); progress = nbt.getInt("Progress"); lastCreatedSlot = nbt.getInt("LastSlot");
-        if (state == STATE_PROCESSING) { state = STATE_IDLE; progress = 0; }
-    }
-
-    // ── Util ──────────────────────────────────────────────────────────────────
-
-    private static String quoted(String s) {
-        return "\"" + s.replace("\\","\\\\").replace("\"","\\\"").replace("\n","\\n").replace("\r","") + "\"";
-    }
-
-    // ── Result record ─────────────────────────────────────────────────────────
 
     record CreationResult(
-            String name, String description, String spritePrompt,
-            String rarity, String itemType, List<String> effects,
-            String special, String mobType, String error
+            String name,
+            String description,
+            String spritePrompt,
+            String rarity,
+            String itemType,
+            List<String> effects,
+            String special,
+            String mobType,
+            String behaviorScript,
+            String error
     ) {
-        static CreationResult error(String msg) {
-            return new CreationResult(null,null,null,null,"use_item",List.of(),null,null,msg);
+        static CreationResult error(String message) {
+            return new CreationResult(null, null, null, null, "use_item", List.of(), null, null, null, message);
         }
     }
 }

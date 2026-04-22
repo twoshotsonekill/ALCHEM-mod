@@ -10,76 +10,73 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.screen.ArrayPropertyDelegate;
 import net.minecraft.screen.PropertyDelegate;
 import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.util.math.BlockPos;
 
 public class BuilderScreenHandler extends ScreenHandler {
 
-    private final Inventory inv;
+    private final Inventory inventory;
     private final PropertyDelegate propertyDelegate;
     private final BlockPos blockPos;
 
-    public BuilderScreenHandler(int syncId, PlayerInventory playerInventory,
-            Inventory inv, PropertyDelegate propertyDelegate, BlockPos blockPos) {
+    public BuilderScreenHandler(int syncId, PlayerInventory playerInventory, Inventory inventory, PropertyDelegate propertyDelegate, BlockPos blockPos) {
         super(AlchemodInit.BUILDER_HANDLER, syncId);
-        checkSize(inv, 2);
-        this.inv = inv;
+        checkSize(inventory, 2);
+        this.inventory = inventory;
         this.propertyDelegate = propertyDelegate;
         this.blockPos = blockPos;
-        inv.onOpen(playerInventory.player);
+        inventory.onOpen(playerInventory.player);
 
-        addSlot(new Slot(inv, BuilderBlockEntity.SLOT_A, 56, 17));
-        addSlot(new Slot(inv, BuilderBlockEntity.SLOT_B, 56, 53));
+        addSlot(new Slot(inventory, BuilderBlockEntity.SLOT_A, 30, 53));
+        addSlot(new Slot(inventory, BuilderBlockEntity.SLOT_B, 48, 53));
 
         for (int row = 0; row < 3; row++) {
-            for (int col = 0; col < 9; col++) {
-                addSlot(new Slot(playerInventory, col + row * 9 + 9, 8 + col * 18, 84 + row * 18));
+            for (int column = 0; column < 9; column++) {
+                addSlot(new Slot(playerInventory, column + row * 9 + 9, 8 + column * 18, 84 + row * 18));
             }
         }
-        for (int col = 0; col < 9; col++) {
-            addSlot(new Slot(playerInventory, col, 8 + col * 18, 142));
+
+        for (int column = 0; column < 9; column++) {
+            addSlot(new Slot(playerInventory, column, 8 + column * 18, 142));
         }
 
         addProperties(propertyDelegate);
     }
 
     public BuilderScreenHandler(int syncId, PlayerInventory playerInventory) {
-        this(syncId, playerInventory, new SimpleInventory(3), new ArrayPropertyDelegate(2), null);
+        this(syncId, playerInventory, new SimpleInventory(2), new ArrayPropertyDelegate(3), null);
     }
 
     @Override
     public ItemStack quickMove(PlayerEntity player, int index) {
         ItemStack result = ItemStack.EMPTY;
-        var slot = slots.get(index);
-        if (slot.hasStack()) {
-            ItemStack original = slot.getStack();
-            result = original.copy();
-            if (index < inv.size()) {
-                if (!insertItem(original, inv.size(), slots.size(), true)) {
-                    return ItemStack.EMPTY;
-                }
-            } else {
-                if (!insertItem(original, 0, 2, false)) {
-                    return ItemStack.EMPTY;
-                }
-            }
-            if (original.isEmpty()) {
-                slot.setStack(ItemStack.EMPTY);
-            } else {
-                slot.markDirty();
-            }
+        Slot slot = slots.get(index);
+        if (!slot.hasStack()) {
+            return result;
         }
+
+        ItemStack original = slot.getStack();
+        result = original.copy();
+        if (index < inventory.size()) {
+            if (!insertItem(original, inventory.size(), slots.size(), true)) {
+                return ItemStack.EMPTY;
+            }
+        } else if (!insertItem(original, 0, inventory.size(), false)) {
+            return ItemStack.EMPTY;
+        }
+
+        if (original.isEmpty()) {
+            slot.setStack(ItemStack.EMPTY);
+        } else {
+            slot.markDirty();
+        }
+
         return result;
     }
 
     @Override
     public boolean canUse(PlayerEntity player) {
-        return inv.canPlayerUse(player);
-    }
-
-    public PropertyDelegate getPropertyDelegate() {
-        return propertyDelegate;
+        return inventory.canPlayerUse(player);
     }
 
     public int getState() {
@@ -90,11 +87,11 @@ public class BuilderScreenHandler extends ScreenHandler {
         return propertyDelegate.get(1);
     }
 
-    public BlockPos getBlockPos() {
-        return blockPos;
+    public int getMode() {
+        return propertyDelegate.get(2);
     }
 
-    public BlockPos getPos() {
+    public BlockPos getBlockPos() {
         return blockPos;
     }
 }

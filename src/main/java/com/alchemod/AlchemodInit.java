@@ -8,7 +8,9 @@ import com.alchemod.block.ForgeBlock;
 import com.alchemod.block.ForgeBlockEntity;
 import com.alchemod.creator.DynamicItemRegistry;
 import com.alchemod.event.ItemAbilityEvents;
+import com.alchemod.network.BuilderModePayload;
 import com.alchemod.network.BuilderPromptPayload;
+import com.alchemod.network.CreatorSettingsPayload;
 import com.alchemod.screen.BuilderScreenHandler;
 import com.alchemod.screen.CreatorScreenHandler;
 import com.alchemod.screen.ForgeScreenHandler;
@@ -141,10 +143,16 @@ public class AlchemodInit implements ModInitializer {
 
         // Register networking for builder text prompts
         net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playC2S().register(
-                com.alchemod.network.BuilderPromptPayload.ID,
-                com.alchemod.network.BuilderPromptPayload.CODEC);
+                BuilderPromptPayload.ID,
+                BuilderPromptPayload.CODEC);
+        net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playC2S().register(
+                BuilderModePayload.ID,
+                BuilderModePayload.CODEC);
+        net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playC2S().register(
+                CreatorSettingsPayload.ID,
+                CreatorSettingsPayload.CODEC);
         net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(
-                com.alchemod.network.BuilderPromptPayload.ID, (payload, context) -> {
+                BuilderPromptPayload.ID, (payload, context) -> {
                     context.server().execute(() -> {
                         var player = context.player();
                         var world = player.getServerWorld();
@@ -155,9 +163,43 @@ public class AlchemodInit implements ModInitializer {
                                     payload.pos().getY() + 0.5,
                                     payload.pos().getZ() + 0.5);
                             if (dist <= 64.0) {
-                                builder.startBuild(payload.prompt(), world);
+                                builder.receivePrompt(payload.prompt(), world);
                             } else {
                                 LOG.warn("[Alchemod] {} tried to trigger builder from too far", player.getName().getString());
+                            }
+                        }
+                    });
+                });
+        net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(
+                BuilderModePayload.ID, (payload, context) -> {
+                    context.server().execute(() -> {
+                        var player = context.player();
+                        var world = player.getServerWorld();
+                        var be = world.getBlockEntity(payload.pos());
+                        if (be instanceof BuilderBlockEntity builder) {
+                            double dist = player.squaredDistanceTo(
+                                    payload.pos().getX() + 0.5,
+                                    payload.pos().getY() + 0.5,
+                                    payload.pos().getZ() + 0.5);
+                            if (dist <= 64.0) {
+                                builder.setBuilderMode(payload.mode());
+                            }
+                        }
+                    });
+                });
+        net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(
+                CreatorSettingsPayload.ID, (payload, context) -> {
+                    context.server().execute(() -> {
+                        var player = context.player();
+                        var world = player.getServerWorld();
+                        var be = world.getBlockEntity(payload.pos());
+                        if (be instanceof CreatorBlockEntity creator) {
+                            double dist = player.squaredDistanceTo(
+                                    payload.pos().getX() + 0.5,
+                                    payload.pos().getY() + 0.5,
+                                    payload.pos().getZ() + 0.5);
+                            if (dist <= 64.0) {
+                                creator.setBehaviorCodeEnabled(payload.behaviorCodeEnabled());
                             }
                         }
                     });

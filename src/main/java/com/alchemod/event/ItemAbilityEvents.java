@@ -3,6 +3,8 @@ package com.alchemod.event;
 import com.alchemod.AlchemodInit;
 import com.alchemod.creator.DynamicItem;
 import com.alchemod.creator.DynamicItemRegistry;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.NbtComponent;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
@@ -22,6 +24,11 @@ public class ItemAbilityEvents {
         UseItemCallback.EVENT.register((player, world, hand) -> {
             ItemStack stack = player.getStackInHand(hand);
             if (!(stack.getItem() instanceof DynamicItem dynItem)) {
+                return ActionResult.PASS;
+            }
+
+            NbtComponent customData = stack.get(DataComponentTypes.CUSTOM_DATA);
+            if (customData != null && !customData.copyNbt().getString("creator_script").isBlank()) {
                 return ActionResult.PASS;
             }
 

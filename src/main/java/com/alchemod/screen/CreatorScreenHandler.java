@@ -11,106 +11,136 @@ import net.minecraft.screen.ArrayPropertyDelegate;
 import net.minecraft.screen.PropertyDelegate;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
+import net.minecraft.util.math.BlockPos;
 
 public class CreatorScreenHandler extends ScreenHandler {
 
-    private final Inventory inv;
-    private final PropertyDelegate delegate;
-
     private static final int STATE_PROCESSING = 1;
 
-    public CreatorScreenHandler(int syncId, PlayerInventory playerInv,
-            Inventory inv, PropertyDelegate delegate) {
+    private final Inventory inventory;
+    private final PropertyDelegate delegate;
+    private final BlockPos blockPos;
+
+    public CreatorScreenHandler(int syncId, PlayerInventory playerInventory, Inventory inventory, PropertyDelegate delegate, BlockPos blockPos) {
         super(AlchemodInit.CREATOR_HANDLER, syncId);
-        checkSize(inv, 3);
-        this.inv      = inv;
+        checkSize(inventory, 3);
+        this.inventory = inventory;
         this.delegate = delegate;
-        inv.onOpen(playerInv.player);
+        this.blockPos = blockPos;
+        inventory.onOpen(playerInventory.player);
 
-        addSlot(new InputSlot(inv, CreatorBlockEntity.SLOT_A, 56, 17));
-        addSlot(new InputSlot(inv, CreatorBlockEntity.SLOT_B, 56, 53));
-        addSlot(new OutputSlot(inv, CreatorBlockEntity.SLOT_OUTPUT, 116, 35));
+        addSlot(new InputSlot(inventory, CreatorBlockEntity.SLOT_A, 56, 17));
+        addSlot(new InputSlot(inventory, CreatorBlockEntity.SLOT_B, 56, 53));
+        addSlot(new OutputSlot(inventory, CreatorBlockEntity.SLOT_OUTPUT, 116, 35));
 
-        for (int row = 0; row < 3; row++)
-            for (int col = 0; col < 9; col++)
-                addSlot(new Slot(playerInv, col + row * 9 + 9, 8 + col * 18, 84 + row * 18));
+        for (int row = 0; row < 3; row++) {
+            for (int column = 0; column < 9; column++) {
+                addSlot(new Slot(playerInventory, column + row * 9 + 9, 8 + column * 18, 84 + row * 18));
+            }
+        }
 
-        for (int col = 0; col < 9; col++)
-            addSlot(new Slot(playerInv, col, 8 + col * 18, 142));
+        for (int column = 0; column < 9; column++) {
+            addSlot(new Slot(playerInventory, column, 8 + column * 18, 142));
+        }
 
         addProperties(delegate);
     }
 
-    public CreatorScreenHandler(int syncId, PlayerInventory playerInv) {
-        this(syncId, playerInv, new SimpleInventory(3), new ArrayPropertyDelegate(3));
+    public CreatorScreenHandler(int syncId, PlayerInventory playerInventory) {
+        this(syncId, playerInventory, new SimpleInventory(3), new ArrayPropertyDelegate(4), null);
     }
 
-    public int getState()           { return delegate.get(0); }
-    public int getProgress()        { return delegate.get(1); }
-    public int getLastCreatedSlot() { return delegate.get(2); }
+    public int getState() {
+        return delegate.get(0);
+    }
+
+    public int getProgress() {
+        return delegate.get(1);
+    }
+
+    public int getLastCreatedSlot() {
+        return delegate.get(2);
+    }
+
+    public boolean isBehaviorCodeEnabled() {
+        return delegate.get(3) != 0;
+    }
+
+    public BlockPos getBlockPos() {
+        return blockPos;
+    }
 
     private boolean isProcessing() {
-        return delegate.get(0) == STATE_PROCESSING;
+        return getState() == STATE_PROCESSING;
     }
 
     @Override
     public ItemStack quickMove(PlayerEntity player, int index) {
         ItemStack result = ItemStack.EMPTY;
         Slot slot = slots.get(index);
-        if (slot.hasStack()) {
-            ItemStack original = slot.getStack();
-            result = original.copy();
-            if (index < inv.size()) {
-                if (!insertItem(original, inv.size(), slots.size(), true))
-                    return ItemStack.EMPTY;
-            } else {
-                if (!insertItem(original, 0, 2, false))
-                    return ItemStack.EMPTY;
-            }
-            if (original.isEmpty()) {
-                slot.setStack(ItemStack.EMPTY);
-                if (index == CreatorBlockEntity.SLOT_OUTPUT && inv instanceof CreatorBlockEntity be) {
-                    be.onOutputTaken();
-                }
-            } else {
-                slot.markDirty();
-            }
+        if (!slot.hasStack()) {
+            return result;
         }
+
+        ItemStack original = slot.getStack();
+        result = original.copy();
+
+        if (index < inventory.size()) {
+            if (!insertItem(original, inventory.size(), slots.size(), true)) {
+                return ItemStack.EMPTY;
+            }
+        } else if (!insertItem(original, 0, 2, false)) {
+            return ItemStack.EMPTY;
+        }
+
+        if (original.isEmpty()) {
+            slot.setStack(ItemStack.EMPTY);
+            if (index == CreatorBlockEntity.SLOT_OUTPUT && inventory instanceof CreatorBlockEntity creatorBlockEntity) {
+                creatorBlockEntity.onOutputTaken();
+            }
+        } else {
+            slot.markDirty();
+        }
+
         return result;
     }
 
-    @Override public boolean canUse(PlayerEntity player) { return inv.canPlayerUse(player); }
+    @Override
+    public boolean canUse(PlayerEntity player) {
+        return inventory.canPlayerUse(player);
+    }
 
-    // ── Slot inner classes ────────────────────────────────────────────────────
+    private final class InputSlot extends Slot {
+        private InputSlot(Inventory inventory, int index, int x, int y) {
+            super(inventory, index, x, y);
+        }
 
-    private class InputSlot extends Slot {
-        InputSlot(Inventory inv, int index, int x, int y) { super(inv, index, x, y); }
-
-        /** Prevent inserting items into the input slots while the AI is processing. */
         @Override
         public boolean canInsert(ItemStack stack) {
             return !isProcessing();
         }
 
-        /**
-         * Prevent taking items OUT of the input slots while the AI is processing.
-         * Without this override, players could pull their inputs back mid-craft,
-         * leaving the state machine in STATE_PROCESSING forever with empty slots.
-         */
-        public boolean canTakeStack(PlayerEntity player) {
+        @Override
+        public boolean canTakeItems(PlayerEntity playerEntity) {
             return !isProcessing();
         }
     }
 
-    private static class OutputSlot extends Slot {
-        OutputSlot(Inventory inv, int index, int x, int y) { super(inv, index, x, y); }
+    private static final class OutputSlot extends Slot {
+        private OutputSlot(Inventory inventory, int index, int x, int y) {
+            super(inventory, index, x, y);
+        }
 
-        @Override public boolean canInsert(ItemStack stack) { return false; }
+        @Override
+        public boolean canInsert(ItemStack stack) {
+            return false;
+        }
 
         @Override
         public void onTakeItem(PlayerEntity player, ItemStack stack) {
-            // Called for regular clicks; shift-click (quickMove) is handled separately above.
-            if (inventory instanceof CreatorBlockEntity be) be.onOutputTaken();
+            if (inventory instanceof CreatorBlockEntity creatorBlockEntity) {
+                creatorBlockEntity.onOutputTaken();
+            }
             super.onTakeItem(player, stack);
         }
     }

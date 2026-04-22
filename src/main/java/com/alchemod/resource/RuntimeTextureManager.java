@@ -6,307 +6,383 @@ import net.fabricmc.api.Environment;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.texture.NativeImage;
 import net.minecraft.client.texture.NativeImageBackedTexture;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.NbtComponent;
 import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NbtCompound;
 import net.minecraft.util.Identifier;
 
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
-/**
- * Generates dynamic textures for created items. Supports two modes:
- * 1. AI-generated sprite from Pollinations.ai (fallback)
- * 2. Procedural texture based on input item colors
- */
 @Environment(EnvType.CLIENT)
-public class RuntimeTextureManager {
+public final class RuntimeTextureManager {
 
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
-            .followRedirects(java.net.http.HttpClient.Redirect.ALWAYS)
+            .followRedirects(HttpClient.Redirect.ALWAYS)
             .build();
 
     private static final Map<Integer, Identifier> LOADED = new ConcurrentHashMap<>();
+    private static final Set<Integer> PENDING_AI_DOWNLOADS = ConcurrentHashMap.newKeySet();
+    private static final Set<Integer> AI_READY = ConcurrentHashMap.newKeySet();
 
-    /**
-     * Generate texture from input items (based on their colors).
-     * Falls back to AI sprite if itemColors is empty.
-     */
+    private static final Map<String, Integer> ITEM_COLORS = Map.ofEntries(
+            Map.entry("minecraft:diamond", 0xFF00FFFF),
+            Map.entry("minecraft:emerald", 0xFF00FF00),
+            Map.entry("minecraft:redstone", 0xFFFF0000),
+            Map.entry("minecraft:gold_ingot", 0xFFFFD700),
+            Map.entry("minecraft:iron_ingot", 0xFFCCCCCC),
+            Map.entry("minecraft:lapis_lazuli", 0xFF0000AA),
+            Map.entry("minecraft:quartz", 0xFFEEEEEE),
+            Map.entry("minecraft:blaze_rod", 0xFFFF6600),
+            Map.entry("minecraft:ghast_tear", 0xFFFFFFFF),
+            Map.entry("minecraft:ender_pearl", 0xFF666688),
+            Map.entry("minecraft:slime_ball", 0xFF00FF00),
+            Map.entry("minecraft:spider_eye", 0xFF660000),
+            Map.entry("minecraft:bone", 0xFFEEEEEE),
+            Map.entry("minecraft:feather", 0xFFFFFFFF),
+            Map.entry("minecraft:flint", 0xFF333333),
+            Map.entry("minecraft:glass", 0xFFAAFFFF),
+            Map.entry("minecraft:obsidian", 0xFF000066),
+            Map.entry("minecraft:nether_star", 0xFFFFFFAA),
+            Map.entry("minecraft:shulker_shell", 0xFFAA6699),
+            Map.entry("minecraft:prismarine_shard", 0xFF00AAAA),
+            Map.entry("minecraft:prismarine_crystals", 0xFF55FFFF),
+            Map.entry("minecraft:heart_of_the_sea", 0xFF0000FF),
+            Map.entry("minecraft:totem_of_undying", 0xFFFFAA00),
+            Map.entry("minecraft:netherite_ingot", 0xFF333333),
+            Map.entry("minecraft:copper_ingot", 0xFFFF8844),
+            Map.entry("minecraft:amethyst_shard", 0xFFAA00FF),
+            Map.entry("minecraft:music_disc_11", 0xFF000000),
+            Map.entry("minecraft:fire_charge", 0xFFFF4400),
+            Map.entry("minecraft:experience_bottle", 0xFF00AAFF)
+    );
+
+    private RuntimeTextureManager() {
+    }
+
+    public static Identifier ensureForStack(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return null;
+        }
+
+        NbtCompound tag = getCustomData(stack);
+        if (tag == null) {
+            return null;
+        }
+
+        int slot = tag.getInt("creator_slot");
+        if (slot < 0) {
+            return null;
+        }
+
+        Identifier loaded = LOADED.get(slot);
+        if (loaded != null) {
+            maybeQueueAiUpgrade(slot, tag.getString("creator_sprite"));
+            return loaded;
+        }
+
+        Identifier textureId;
+        Map<String, Integer> inputColors = extractInputColors(tag.getString("creator_input_a"), tag.getString("creator_input_b"));
+        if (!inputColors.isEmpty()) {
+            textureId = registerGeneratedTexture(slot, buildGlyphTexture(
+                    firstColor(inputColors, 0xFF8844AA),
+                    secondColor(inputColors, 0xFF4422AA),
+                    getRarityColor(normalise(tag.getString("creator_rarity")))));
+        } else {
+            textureId = registerGeneratedTexture(slot, buildPromptTexture(
+                    slot,
+                    tag.getString("creator_name"),
+                    tag.getString("creator_sprite"),
+                    normalise(tag.getString("creator_rarity"))));
+        }
+
+        LOADED.put(slot, textureId);
+        maybeQueueAiUpgrade(slot, tag.getString("creator_sprite"));
+        return textureId;
+    }
+
     public static void generateFromInputs(int slot, Map<String, Integer> itemColors, String aiPrompt, Consumer<Identifier> onReady) {
         if (LOADED.containsKey(slot)) {
             onReady.accept(LOADED.get(slot));
+            maybeQueueAiUpgrade(slot, aiPrompt);
             return;
         }
 
-        // Generate procedural texture from input colors
-        if (itemColors != null && !itemColors.isEmpty()) {
-            MinecraftClient.getInstance().execute(() -> {
-                Identifier id = generateFromColors(slot, itemColors);
-                LOADED.put(slot, id);
-                onReady.accept(id);
-            });
-        } else {
-            // Fall back to AI sprite
-            downloadSprite(aiPrompt, slot, onReady);
-        }
+        MinecraftClient.getInstance().execute(() -> {
+            Identifier id = registerGeneratedTexture(slot, buildGlyphTexture(
+                    firstColor(itemColors, 0xFF8844AA),
+                    secondColor(itemColors, 0xFF4422AA),
+                    getRarityColor(slot)));
+            LOADED.put(slot, id);
+            onReady.accept(id);
+            maybeQueueAiUpgrade(slot, aiPrompt);
+        });
     }
 
-    /**
-     * Kick off an async sprite download for the given slot index.
-     * When done, calls onReady with the texture Identifier on the render thread.
-     */
     public static void downloadSprite(String prompt, int slot, Consumer<Identifier> onReady) {
+        if (prompt == null || prompt.isBlank()) {
+            if (LOADED.containsKey(slot)) {
+                onReady.accept(LOADED.get(slot));
+            } else {
+                generateFallback(slot, onReady);
+            }
+            return;
+        }
+
+        if (AI_READY.contains(slot) && LOADED.containsKey(slot)) {
+            onReady.accept(LOADED.get(slot));
+            return;
+        }
+
+        if (!PENDING_AI_DOWNLOADS.add(slot)) {
+            if (LOADED.containsKey(slot)) {
+                onReady.accept(LOADED.get(slot));
+            }
+            return;
+        }
+
+        CompletableFuture.supplyAsync(() -> fetchSpriteBytes(prompt, slot))
+                .thenAccept(bytes -> MinecraftClient.getInstance().execute(() -> {
+                    try {
+                        Identifier texId;
+                        if (bytes != null) {
+                            NativeImage image = NativeImage.read(NativeImage.Format.RGBA, new ByteArrayInputStream(bytes));
+                            texId = registerGeneratedTexture(slot, scaleToPixelArt(image, 16, 16));
+                            AI_READY.add(slot);
+                        } else {
+                            texId = LOADED.getOrDefault(slot, registerGeneratedTexture(slot, buildPromptTexture(slot, "", prompt, "common")));
+                        }
+
+                        LOADED.put(slot, texId);
+                        onReady.accept(texId);
+                    } catch (Exception e) {
+                        AlchemodInit.LOG.error("[Creator] Failed to decode AI sprite", e);
+                        Identifier fallback = LOADED.getOrDefault(slot, registerGeneratedTexture(slot, buildPromptTexture(slot, "", prompt, "common")));
+                        LOADED.put(slot, fallback);
+                        onReady.accept(fallback);
+                    } finally {
+                        PENDING_AI_DOWNLOADS.remove(slot);
+                    }
+                }));
+    }
+
+    public static void generateFallback(int slot, Consumer<Identifier> onReady) {
         if (LOADED.containsKey(slot)) {
             onReady.accept(LOADED.get(slot));
             return;
         }
 
-        // Pollinations.ai — free AI image generation, no API key required
-        // We ask for a 16×16 pixel art Minecraft item icon
-        String encodedPrompt = encodeUrl(
-                "16x16 pixel art minecraft item icon, " + prompt
-                + ", transparent background, centered, no text, simple flat style");
-
-        String url = "https://image.pollinations.ai/prompt/" + encodedPrompt
-                + "?width=16&height=16&nologo=true&seed=" + slot;
-
-        AlchemodInit.LOG.info("[Creator] Fetching sprite: {}", url);
-
-        CompletableFuture.supplyAsync(() -> {
-            try {
-                HttpRequest req = HttpRequest.newBuilder()
-                        .uri(URI.create(url))
-                        .timeout(Duration.ofSeconds(30))
-                        .GET()
-                        .build();
-
-                HttpResponse<InputStream> resp = HTTP.send(req,
-                        HttpResponse.BodyHandlers.ofInputStream());
-
-                if (resp.statusCode() != 200) {
-                    AlchemodInit.LOG.warn("[Creator] Sprite HTTP {}", resp.statusCode());
-                    return (byte[]) null;
-                }
-
-                return resp.body().readAllBytes();
-
-            } catch (Exception e) {
-                AlchemodInit.LOG.error("[Creator] Sprite download failed", e);
-                return (byte[]) null;
-            }
-        }).thenAccept(bytes -> {
-            // Must register the texture on the render / main client thread
-            MinecraftClient.getInstance().execute(() -> {
-                Identifier texId = Identifier.of(AlchemodInit.MOD_ID,
-                        "textures/item/dynamic_item_" + slot + ".png");
-                try {
-                    if (bytes != null) {
-                        NativeImage img = NativeImage.read(
-                                NativeImage.Format.RGBA,
-                                new java.io.ByteArrayInputStream(bytes));
-                        // Scale to 16×16 if needed
-                        NativeImage scaled = scaleToPixelArt(img, 16, 16);
-                        NativeImageBackedTexture tex = new NativeImageBackedTexture(scaled);
-                        MinecraftClient.getInstance().getTextureManager()
-                                .registerTexture(texId, tex);
-                        LOADED.put(slot, texId);
-                        AlchemodInit.LOG.info("[Creator] Sprite registered for slot {}", slot);
-                    } else {
-                        // Fall back to a generated procedural texture
-                        Identifier fallback = generateFallbackTexture(slot);
-                        LOADED.put(slot, fallback);
-                        texId = fallback;
-                    }
-                    onReady.accept(texId);
-                } catch (Exception e) {
-                    AlchemodInit.LOG.error("[Creator] Failed to load image bytes", e);
-                    Identifier fallback = generateFallbackTexture(slot);
-                    LOADED.put(slot, fallback);
-                    onReady.accept(fallback);
-                }
-            });
+        MinecraftClient.getInstance().execute(() -> {
+            Identifier id = registerGeneratedTexture(slot, buildPromptTexture(slot, "", "", "common"));
+            LOADED.put(slot, id);
+            onReady.accept(id);
         });
     }
 
-    /** Scale a NativeImage to exactly w×h using nearest-neighbour (pixel art safe). */
-    private static NativeImage scaleToPixelArt(NativeImage src, int w, int h) {
-        if (src.getWidth() == w && src.getHeight() == h) return src;
-        NativeImage dst = new NativeImage(NativeImage.Format.RGBA, w, h, false);
-        for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-                int sx = x * src.getWidth()  / w;
-                int sy = y * src.getHeight() / h;
-                dst.setColorArgb(x, y, src.getColorArgb(sx, sy));
-            }
-        }
-        return dst;
+    public static boolean isLoaded(int slot) {
+        return LOADED.containsKey(slot);
     }
 
-    /**
-     * Generates a deterministic procedural 16×16 texture so the item is never
-     * invisible even when the download fails.
-     */
-    private static Identifier generateFallbackTexture(int slot) {
-        Identifier id = Identifier.of(AlchemodInit.MOD_ID,
-                "textures/item/dynamic_fallback_" + slot + ".png");
+    public static Identifier getLoaded(int slot) {
+        return LOADED.get(slot);
+    }
 
-        // Seed colours from slot so each item looks different
-        java.util.Random rng = new java.util.Random(slot * 0x9E3779B97F4A7C15L);
-        int r1 = rng.nextInt(180) + 60;
-        int g1 = rng.nextInt(180) + 60;
-        int b1 = rng.nextInt(180) + 60;
-        int r2 = (r1 + 80) % 256;
-        int g2 = (g1 + 80) % 256;
-        int b2 = (b1 + 120) % 256;
+    private static byte[] fetchSpriteBytes(String prompt, int slot) {
+        try {
+            String encodedPrompt = URLEncoder.encode(
+                    "16x16 pixel art minecraft item icon, " + prompt + ", transparent background, centered, no text, simple flat style",
+                    StandardCharsets.UTF_8).replace("+", "%20");
 
-        NativeImage img = new NativeImage(NativeImage.Format.RGBA, 16, 16, false);
-        for (int y = 0; y < 16; y++) {
-            for (int x = 0; x < 16; x++) {
-                boolean border = (x == 0 || x == 15 || y == 0 || y == 15);
-                boolean cross  = (x == 7 || x == 8 || y == 7 || y == 8);
-                boolean corner = (x < 2 || x > 13) && (y < 2 || y > 13);
-                if (corner) {
-                    img.setColorArgb(x, y, 0x00000000);
-                } else if (border || cross) {
-                    img.setColorArgb(x, y, 0xFF000000 | (r2 << 16) | (g2 << 8) | b2);
-                } else {
-                    img.setColorArgb(x, y, 0xFF000000 | (r1 << 16) | (g1 << 8) | b1);
-                }
+            String url = "https://image.pollinations.ai/prompt/" + encodedPrompt
+                    + "?width=16&height=16&nologo=true&seed=" + slot;
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(30))
+                    .GET()
+                    .build();
+
+            HttpResponse<InputStream> response = HTTP.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            if (response.statusCode() != 200) {
+                AlchemodInit.LOG.warn("[Creator] Sprite HTTP {}", response.statusCode());
+                return null;
             }
+
+            return response.body().readAllBytes();
+        } catch (Exception e) {
+            AlchemodInit.LOG.warn("[Creator] Sprite download failed: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private static void maybeQueueAiUpgrade(int slot, String prompt) {
+        if (prompt == null || prompt.isBlank() || AI_READY.contains(slot) || PENDING_AI_DOWNLOADS.contains(slot)) {
+            return;
         }
 
-        NativeImageBackedTexture tex = new NativeImageBackedTexture(img);
-        MinecraftClient.getInstance().getTextureManager().registerTexture(id, tex);
+        downloadSprite(prompt, slot, texId -> AlchemodInit.LOG.info("[Creator] Upgraded sprite ready for slot {}", slot));
+    }
+
+    private static Map<String, Integer> extractInputColors(String inputA, String inputB) {
+        Map<String, Integer> colors = new HashMap<>();
+        if (inputA != null && ITEM_COLORS.containsKey(inputA)) {
+            colors.put(inputA, ITEM_COLORS.get(inputA));
+        }
+        if (inputB != null && ITEM_COLORS.containsKey(inputB)) {
+            colors.put(inputB, ITEM_COLORS.get(inputB));
+        }
+        return colors;
+    }
+
+    private static Identifier registerGeneratedTexture(int slot, NativeImage image) {
+        Identifier id = textureId(slot);
+        NativeImageBackedTexture texture = new NativeImageBackedTexture(image);
+        MinecraftClient.getInstance().getTextureManager().registerTexture(id, texture);
         return id;
     }
 
-    /**
-     * Generates a 16×16 procedural texture based on input item colors.
-     * Blends colors together and adds patterns based on rarity.
-     */
-    private static Identifier generateFromColors(int slot, Map<String, Integer> itemColors) {
-        Identifier id = Identifier.of(AlchemodInit.MOD_ID,
-                "textures/item/dynamic_item_" + slot + ".png");
+    private static Identifier textureId(int slot) {
+        return Identifier.of(AlchemodInit.MOD_ID, "dynamic/generated_item_" + slot);
+    }
 
-        // Get primary and secondary colors from inputs
-        int primaryColor = 0xFF8844AA;
-        int secondaryColor = 0xFF4422AA;
-
-        if (!itemColors.isEmpty()) {
-            var entryIter = itemColors.entrySet().iterator();
-            if (entryIter.hasNext()) {
-                primaryColor = entryIter.next().getValue();
-            }
-            if (entryIter.hasNext()) {
-                secondaryColor = entryIter.next().getValue();
-            }
+    private static NativeImage scaleToPixelArt(NativeImage source, int width, int height) {
+        if (source.getWidth() == width && source.getHeight() == height) {
+            return source;
         }
 
+        NativeImage scaled = new NativeImage(NativeImage.Format.RGBA, width, height, false);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int srcX = x * source.getWidth() / width;
+                int srcY = y * source.getHeight() / height;
+                scaled.setColorArgb(x, y, source.getColorArgb(srcX, srcY));
+            }
+        }
+        return scaled;
+    }
+
+    private static NativeImage buildPromptTexture(int slot, String name, String prompt, String rarity) {
+        int hash = (name + "|" + prompt + "|" + rarity + "|" + slot).hashCode();
+        int primary = 0xFF000000
+                | (clamp(70 + ((hash >> 16) & 0x7F)) << 16)
+                | (clamp(70 + ((hash >> 8) & 0x7F)) << 8)
+                | clamp(70 + (hash & 0x7F));
+        int secondary = 0xFF000000
+                | (clamp(45 + ((hash >> 9) & 0x9F)) << 16)
+                | (clamp(45 + ((hash >> 3) & 0x9F)) << 8)
+                | clamp(45 + ((hash >> 19) & 0x9F));
+        return buildGlyphTexture(primary, secondary, getRarityColor(rarity));
+    }
+
+    private static NativeImage buildGlyphTexture(int primaryColor, int secondaryColor, int rarityColor) {
         int pr = (primaryColor >> 16) & 0xFF;
         int pg = (primaryColor >> 8) & 0xFF;
         int pb = primaryColor & 0xFF;
         int sr = (secondaryColor >> 16) & 0xFF;
         int sg = (secondaryColor >> 8) & 0xFF;
         int sb = secondaryColor & 0xFF;
+        int rr = (rarityColor >> 16) & 0xFF;
+        int rg = (rarityColor >> 8) & 0xFF;
+        int rb = rarityColor & 0xFF;
 
-        // Rarity border color based on slot
-        int rarityColor = getRarityColor(slot);
-
-        NativeImage img = new NativeImage(NativeImage.Format.RGBA, 16, 16, false);
+        NativeImage image = new NativeImage(NativeImage.Format.RGBA, 16, 16, false);
         for (int y = 0; y < 16; y++) {
             for (int x = 0; x < 16; x++) {
-                boolean border = (x <= 1 || x >= 14 || y <= 1 || y >= 14);
-                boolean innerBorder = (x == 2 || x == 13 || y == 2 || y == 13);
-                boolean center = (x >= 5 && x <= 10 && y >= 5 && y <= 10);
-                boolean corner = (x < 3 || x > 12) && (y < 3 || y > 12);
+                double dx = Math.abs(x - 7.5);
+                double dy = Math.abs(y - 7.5);
+                double diamond = dx + dy;
+                boolean outerGlyph = diamond <= 7.2;
+                boolean innerGlyph = diamond <= 5.1;
+                boolean coreGlyph = diamond <= 2.6;
+                boolean runeBand = innerGlyph && !coreGlyph && ((x + y) % 3 == 0 || x == 7 || x == 8 || y == 7 || y == 8);
+                boolean accentCorner = (x == 4 && y == 4) || (x == 11 && y == 4) || (x == 4 && y == 11) || (x == 11 && y == 11);
 
-                int r, g, b, a;
-                if (corner) {
-                    a = 0;
-                    r = g = b = 0;
-                } else if (border) {
-                    // Rarity border
-                    r = (rarityColor >> 16) & 0xFF;
-                    g = (rarityColor >> 8) & 0xFF;
-                    b = rarityColor & 0xFF;
-                    a = 255;
-                } else if (center) {
-                    // Center highlight - blend of colors with gradient
-                    float t = (x + y) / 20.0f;
-                    r = (int)(pr * (1 - t) + sr * t);
-                    g = (int)(pg * (1 - t) + sg * t);
-                    b = (int)(pb * (1 - t) + sb * t);
-                    a = 255;
-                } else if (innerBorder) {
-                    // Secondary color ring
-                    r = sr;
-                    g = sg;
-                    b = sb;
-                    a = 255;
+                int argb;
+                if (!outerGlyph) {
+                    argb = 0x00000000;
+                } else if (!innerGlyph) {
+                    argb = 0xFF000000 | (rr << 16) | (rg << 8) | rb;
+                } else if (coreGlyph) {
+                    int mixR = clamp((pr + sr + rr) / 3 + 28);
+                    int mixG = clamp((pg + sg + rg) / 3 + 28);
+                    int mixB = clamp((pb + sb + rb) / 3 + 28);
+                    argb = 0xFF000000 | (mixR << 16) | (mixG << 8) | mixB;
+                } else if (runeBand || accentCorner) {
+                    int mixR = clamp((sr * 3 + rr) / 4 + 12);
+                    int mixG = clamp((sg * 3 + rg) / 4 + 12);
+                    int mixB = clamp((sb * 3 + rb) / 4 + 12);
+                    argb = 0xFF000000 | (mixR << 16) | (mixG << 8) | mixB;
                 } else {
-                    // Main area - blend with pattern
-                    float blend = ((x * 3 + y * 2) % 7) / 7.0f;
-                    r = (int)(pr * (1 - blend * 0.5) + 40 * blend);
-                    g = (int)(pg * (1 - blend * 0.5) + 40 * blend);
-                    b = (int)(pb * (1 - blend * 0.5) + 60 * blend);
-                    a = 255;
+                    float blend = (float) ((x * 2 + y * 3) % 11) / 10.0f;
+                    int mixR = clamp((int) (pr * (1.0f - blend * 0.35f) + sr * blend * 0.35f));
+                    int mixG = clamp((int) (pg * (1.0f - blend * 0.35f) + sg * blend * 0.35f));
+                    int mixB = clamp((int) (pb * (1.0f - blend * 0.35f) + sb * blend * 0.35f));
+                    argb = 0xFF000000 | (mixR << 16) | (mixG << 8) | mixB;
                 }
 
-                int argb = (a << 24) | (r << 16) | (g << 8) | b;
-                img.setColorArgb(x, y, argb);
+                image.setColorArgb(x, y, argb);
             }
         }
 
-        NativeImageBackedTexture tex = new NativeImageBackedTexture(img);
-        MinecraftClient.getInstance().getTextureManager().registerTexture(id, tex);
-        return id;
+        image.setColorArgb(7, 4, 0xFFFFFFFF);
+        image.setColorArgb(8, 5, 0xFFF6F2D8);
+        image.setColorArgb(10, 9, 0xCCFFFFFF);
+        return image;
     }
 
-    /**
-     * Get rarity color based on slot (cycles through rarities).
-     */
-    private static int getRarityColor(int slot) {
-        int[] rarityColors = {
-            0xFF9E9E9E, // common - gray
-            0xFF55AA55, // uncommon - green
-            0xFF55AAAA, // rare - aqua
-            0xFFAA55AA, // epic - purple
-            0xFFFFAA00  // legendary - gold
+    private static int firstColor(Map<String, Integer> colors, int fallback) {
+        return colors.values().stream().findFirst().orElse(fallback);
+    }
+
+    private static int secondColor(Map<String, Integer> colors, int fallback) {
+        return colors.values().stream().skip(1).findFirst().orElse(firstColor(colors, fallback));
+    }
+
+    private static int getRarityColor(String rarity) {
+        return switch (rarity) {
+            case "uncommon" -> 0xFF55AA55;
+            case "rare" -> 0xFF55AAAA;
+            case "epic" -> 0xFFAA55AA;
+            case "legendary" -> 0xFFFFAA00;
+            default -> 0xFF9E9E9E;
         };
-        return rarityColors[slot % rarityColors.length];
     }
 
-    /**
-     * Generate a fallback procedural texture when no input colors are available.
-     */
-    public static void generateFallback(int slot, Consumer<Identifier> onReady) {
-        if (LOADED.containsKey(slot)) {
-            onReady.accept(LOADED.get(slot));
-            return;
-        }
-        MinecraftClient.getInstance().execute(() -> {
-            Identifier id = generateFallbackTexture(slot);
-            LOADED.put(slot, id);
-            onReady.accept(id);
-        });
+    private static int getRarityColor(int slot) {
+        return switch (slot % 5) {
+            case 1 -> 0xFF55AA55;
+            case 2 -> 0xFF55AAAA;
+            case 3 -> 0xFFAA55AA;
+            case 4 -> 0xFFFFAA00;
+            default -> 0xFF9E9E9E;
+        };
     }
 
-    private static String encodeUrl(String s) {
-        try {
-            return java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20");
-        } catch (Exception e) {
-            return s.replace(" ", "%20");
-        }
+    private static String normalise(String value) {
+        return value == null ? "" : value.toLowerCase().replace("minecraft:", "").trim();
     }
 
-    public static boolean isLoaded(int slot) { return LOADED.containsKey(slot); }
-    public static Identifier getLoaded(int slot) { return LOADED.get(slot); }
+    private static NbtCompound getCustomData(ItemStack stack) {
+        NbtComponent customData = stack.get(DataComponentTypes.CUSTOM_DATA);
+        return customData != null ? customData.copyNbt() : null;
+    }
+
+    private static int clamp(int value) {
+        return Math.max(0, Math.min(255, value));
+    }
 }
