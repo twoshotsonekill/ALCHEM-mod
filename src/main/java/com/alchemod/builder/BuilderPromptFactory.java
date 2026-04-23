@@ -33,14 +33,16 @@ Execution contract:
 - Y is vertical.
 - Keep x and z within [-64, 64].
 - Keep y within [-8, 72].
-- Use only this palette: %s
+- Use only this palette (expanded with 100+ blocks): %s
 - Use build_plan for an inspectable structural summary only. Do not include hidden reasoning, chain-of-thought, XML tags, or markdown fences.
 - The code must be SIMPLE JavaScript - no const/let/var declarations, no arrays, no objects, no loops with complex logic.
 - Use simple function calls only: block(), box(), line(), sphere(), rng(), Math.floor(), Math.min(), Math.max(), Math.abs().
 - Leave empty space by omitting placements. There is no air block.
 - Prefer large, articulated scenes that still respect the safe bounds and budget.
-- Example GOOD code: box(-10, 0, -10, 10, 20, 10, "stone"); sphere(0, 10, 0, 5, "cobblestone");
+- The expanded palette includes wood variants, stone types, ores, metals, glass, concrete, terracotta, nether/end blocks, and decorative elements.
+- Example GOOD code: box(-10, 0, -10, 10, 20, 10, "stone"); sphere(0, 10, 0, 5, "cobblestone"); line(-20, 5, 0, 20, 5, 0, "oak_planks");
 - Example BAD code: sphere("stone", tx, baseY+2, z, r) - WRONG ORDER! (block name must be LAST)
+- Example palette usage: stone, oak_planks, deepslate, bricks, glass, concrete, terracotta, nether_bricks, end_stone, purpur_block, etc.
 """.formatted(palette);
     }
 

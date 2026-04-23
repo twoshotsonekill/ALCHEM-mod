@@ -24,11 +24,47 @@ public final class BuilderRuntime {
     public static final int MAX_SPHERE_RADIUS = 16;
     public static final int INSTRUCTION_BUDGET = 1_500_000;
     public static final List<String> SIMPLE_PALETTE_BLOCKS = List.of(
-            "stone", "cobblestone", "oak_planks", "bricks", "stone_bricks",
-            "grass_block", "dirt", "sand", "oak_log", "oak_leaves",
+            // Stone variants
+            "stone", "cobblestone", "stone_bricks", "cracked_stone_bricks", "mossy_stone_bricks",
+            "deepslate", "deepslate_bricks", "deepslate_tiles",
+            // Wood variants
+            "oak_planks", "spruce_planks", "birch_planks", "jungle_planks", "acacia_planks", "dark_oak_planks",
+            "oak_log", "spruce_log", "birch_log", "jungle_log", "acacia_log", "dark_oak_log",
+            "oak_leaves", "spruce_leaves", "birch_leaves", "jungle_leaves", "acacia_leaves", "dark_oak_leaves",
+            // Brick variants
+            "bricks", "mud_bricks", "nether_bricks", "red_nether_bricks",
+            // Natural blocks
+            "grass_block", "dirt", "coarse_dirt", "rooted_dirt", "sand", "red_sand",
+            "gravel", "clay", "mud", "dripstone_block",
+            // Ores
+            "coal_ore", "copper_ore", "iron_ore", "gold_ore", "diamond_ore", "emerald_ore", "lapis_ore", "redstone_ore",
+            // Metals and precious
+            "iron_block", "gold_block", "diamond_block", "emerald_block", "lapis_block", "redstone_block", "copper_block",
+            // Glass variants
+            "glass", "tinted_glass",
+            // Light sources
+            "glowstone", "sea_lantern", "shroomlight", "amethyst_block",
+            // Wool variants
             "white_wool", "black_wool", "red_wool", "blue_wool", "green_wool",
             "yellow_wool", "orange_wool", "purple_wool", "brown_wool", "gray_wool",
-            "glass", "glowstone", "iron_block", "gold_block");
+            "light_gray_wool", "cyan_wool", "lime_wool", "pink_wool", "magenta_wool",
+            // Concrete variants
+            "white_concrete", "black_concrete", "red_concrete", "blue_concrete", "green_concrete",
+            "yellow_concrete", "orange_concrete", "purple_concrete", "brown_concrete", "gray_concrete",
+            "light_gray_concrete", "cyan_concrete", "lime_concrete", "pink_concrete", "magenta_concrete",
+            // Terracotta variants
+            "terracotta", "white_terracotta", "black_terracotta", "red_terracotta", "blue_terracotta",
+            // Nether blocks
+            "netherrack", "soul_sand", "soul_soil", "basalt", "blackstone", "gilded_blackstone",
+            // End blocks
+            "end_stone", "end_stone_bricks", "purpur_block", "purpur_pillar",
+            // Decorative
+            "oak_stairs", "stone_stairs", "brick_stairs", "sandstone_stairs",
+            "oak_slab", "stone_slab", "brick_slab", "sandstone_slab",
+            "oak_fence", "stone_brick_fence", "nether_brick_fence",
+            "oak_door", "iron_door",
+            // Misc
+            "sandstone", "red_sandstone", "prismarine", "dark_prismarine", "sea_pickle");
 
     private static final Set<String> SIMPLE_PALETTE = Set.copyOf(SIMPLE_PALETTE_BLOCKS.stream()
             .map(block -> "minecraft:" + block)
