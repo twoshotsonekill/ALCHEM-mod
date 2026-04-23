@@ -53,13 +53,10 @@ class BuilderExecutionSimulatedAiTest {
         BuilderProgram program = BuilderResponseParser.parse(aiResponse);
         assertNotNull(program);
 
-        List<String> placements = new ArrayList<>();
-        try {
+        assertThrows(IllegalArgumentException.class, () -> {
+            List<String> placements = new ArrayList<>();
             BuilderRuntime.execute(program, 0, (x, y, z, blockId) -> placements.add(x + "," + y + "," + z));
-            System.out.println("Generated " + placements.size() + " placements (let was allowed)");
-        } catch (Exception e) {
-            System.out.println("FAILED: " + e.getMessage());
-        }
+        }, "Expected execution to fail due to 'let' declaration");
     }
 
     @Test
@@ -71,13 +68,10 @@ class BuilderExecutionSimulatedAiTest {
         BuilderProgram program = BuilderResponseParser.parse(aiResponse);
         assertNotNull(program);
 
-        List<String> placements = new ArrayList<>();
-        try {
+        assertThrows(IllegalArgumentException.class, () -> {
+            List<String> placements = new ArrayList<>();
             BuilderRuntime.execute(program, 0, (x, y, z, blockId) -> placements.add(x + "," + y + "," + z));
-            System.out.println("Generated " + placements.size() + " placements (var was allowed)");
-        } catch (Exception e) {
-            System.out.println("FAILED: " + e.getMessage());
-        }
+        }, "Expected execution to fail due to 'var' declaration");
     }
 
     @Test
@@ -89,13 +83,10 @@ class BuilderExecutionSimulatedAiTest {
         BuilderProgram program = BuilderResponseParser.parse(aiResponse);
         assertNotNull(program);
 
-        List<String> placements = new ArrayList<>();
-        try {
+        assertThrows(IllegalArgumentException.class, () -> {
+            List<String> placements = new ArrayList<>();
             BuilderRuntime.execute(program, 0, (x, y, z, blockId) -> placements.add(x + "," + y + "," + z));
-            System.out.println("Generated " + placements.size() + " placements");
-        } catch (Exception e) {
-            System.out.println("FAILED (expected): " + e.getMessage());
-        }
+        }, "Expected execution to fail due to malformed syntax (triple dots)");
     }
 
     @Test
@@ -107,13 +98,10 @@ class BuilderExecutionSimulatedAiTest {
         BuilderProgram program = BuilderResponseParser.parse(aiResponse);
         assertNotNull(program);
 
-        List<String> placements = new ArrayList<>();
-        try {
+        assertThrows(IllegalArgumentException.class, () -> {
+            List<String> placements = new ArrayList<>();
             BuilderRuntime.execute(program, 0, (x, y, z, blockId) -> placements.add(x + "," + y + "," + z));
-            System.out.println("Generated " + placements.size() + " placements");
-        } catch (Exception e) {
-            System.out.println("FAILED (expected): " + e.getMessage());
-        }
+        }, "Expected execution to fail due to unsupported rng.noise2() function");
     }
 
     @Test
@@ -125,16 +113,13 @@ class BuilderExecutionSimulatedAiTest {
         BuilderProgram program = BuilderResponseParser.parse(actualAiResponse);
         assertNotNull(program);
 
-        List<String> placements = new ArrayList<>();
-        try {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () -> {
+            List<String> placements = new ArrayList<>();
             BuilderRuntime.execute(program, 0, (x, y, z, blockId) -> placements.add(x + "," + y + "," + z + ":" + blockId));
-            System.out.println("Generated " + placements.size() + " placements");
-            fail("Expected execution to fail due to const/let/arrays/noise functions");
-        } catch (Exception e) {
-            System.out.println("EXPECTED FAILURE: " + e.getMessage());
-            assertTrue(e.getMessage().contains("const") || e.getMessage().contains("let") || e.getMessage().contains("for") || e.getMessage().contains("array") || e.getMessage().contains("noise"),
-                    "Error should be related to unsupported JavaScript features");
-        }
+        });
+        
+        assertTrue(exception.getMessage().contains("const") || exception.getMessage().contains("let") || exception.getMessage().contains("for") || exception.getMessage().contains("array") || exception.getMessage().contains("noise"),
+                "Error should be related to unsupported JavaScript features, but got: " + exception.getMessage());
     }
 
     @Test
