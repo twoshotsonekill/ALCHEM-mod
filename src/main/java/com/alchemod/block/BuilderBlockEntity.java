@@ -32,7 +32,9 @@ import net.minecraft.world.World;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
+import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandlerFactory, Inventory {
 
@@ -55,6 +57,12 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
     private String lastError = "";
     private String lastBuildPlan = "";
     private boolean aiPending = false;
+
+    // Async block placement queue to prevent server thread freezes
+    private final Queue<PlacementTask> placementQueue = new ConcurrentLinkedQueue<>();
+    private int totalPlacements = 0;
+    private int completedPlacements = 0;
+    private static final int PLACEMENTS_PER_TICK = 256;
 
     private final PropertyDelegate delegate = new PropertyDelegate() {
         @Override
@@ -91,7 +99,49 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
             progress = Math.min(progress + 1, MAX_PROGRESS - 1);
             markDirty();
         }
+
+        // Drain placement queue gradually to prevent server freezes
+        if (state == STATE_BUILDING && !placementQueue.isEmpty()) {
+            int placed = 0;
+            while (!placementQueue.isEmpty() && placed < PLACEMENTS_PER_TICK) {
+                PlacementTask task = placementQueue.poll();
+                try {
+                    placeRelativeBlock(world, task.origin(), task.x(), task.y(), task.z(), task.blockId());
+                    completedPlacements++;
+                    placed++;
+                } catch (Exception e) {
+                    AlchemodInit.LOG.warn("[Builder] Failed to place block: {}", e.getMessage());
+                }
+            }
+
+            // Update progress based on placement completion
+            if (totalPlacements > 0) {
+                progress = 10 + (int) (85.0 * completedPlacements / totalPlacements);
+            }
+
+            // Transition to complete when queue is empty
+            if (placementQueue.isEmpty() && completedPlacements >= totalPlacements) {
+                progress = MAX_PROGRESS;
+                state = STATE_COMPLETE;
+                completedTime = System.currentTimeMillis();
+                AlchemodInit.LOG.info("[Builder] Completed async build with {} placements", completedPlacements);
+            }
+
+            markDirty();
+        }
+
+        // Auto-reset STATE_COMPLETE after 3 seconds
+        if (state == STATE_COMPLETE && completedTime > 0) {
+            if (System.currentTimeMillis() - completedTime > 3000) {
+                state = STATE_IDLE;
+                progress = 0;
+                completedTime = 0;
+                markDirty();
+            }
+        }
     }
+
+    private long completedTime = 0;
 
     public void startBuild(String prompt, World world) {
         if (aiPending || prompt == null || prompt.isBlank()) {
@@ -159,6 +209,9 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
 
         state = STATE_BUILDING;
         progress = 10;
+        completedPlacements = 0;
+        totalPlacements = 0;
+        placementQueue.clear();
         markDirty();
 
         try {
@@ -167,14 +220,17 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
 
             BlockPos origin = getPos().up();
             int fallbackSeed = Objects.hash(promptText, getPos().getX(), getPos().getY(), getPos().getZ());
-            BuilderRuntime.ExecutionResult result = BuilderRuntime.execute(program, fallbackSeed,
-                    (x, y, z, blockId) -> placeRelativeBlock(world, origin, x, y, z, blockId));
 
-            progress = MAX_PROGRESS;
-            state = STATE_COMPLETE;
+            // Queue placements instead of executing immediately
+            BuilderRuntime.ExecutionResult result = BuilderRuntime.execute(program, fallbackSeed,
+                    (x, y, z, blockId) -> {
+                        placementQueue.offer(new PlacementTask(origin, x, y, z, blockId));
+                        totalPlacements++;
+                    });
+
             lastError = "";
 
-            AlchemodInit.LOG.info("[Builder] Completed build with {} placements (legacy={}, seed={})",
+            AlchemodInit.LOG.info("[Builder] Queued {} placements for async execution (legacy={}, seed={})",
                     result.placements(), result.legacyFallback(), result.seedUsed());
             if (!lastBuildPlan.isBlank()) {
                 AlchemodInit.LOG.info("[Builder] Plan:\n{}", lastBuildPlan);
@@ -196,6 +252,11 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
 
         markDirty();
     }
+
+    /**
+     * Record for a single block placement task in the async queue.
+     */
+    private record PlacementTask(BlockPos origin, int x, int y, int z, String blockId) {}
 
     private void placeRelativeBlock(World world, BlockPos origin, int x, int y, int z, String blockId) {
         BlockPos target = origin.add(x, y, z);
