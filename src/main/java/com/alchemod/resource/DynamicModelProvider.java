@@ -8,14 +8,9 @@ import net.minecraft.client.texture.Sprite;
 import net.minecraft.util.Identifier;
 
 /**
- * A BuiltinItemRenderer is the cleanest way to render dynamic textures
- * for pre-registered items in 1.21.x without touching BakedModel internals.
- *
- * We use DrawContext.drawItem / drawTexture at the screen level instead,
- * which is simpler and fully supported.
- *
- * This class provides helpers used by the Creator screen to draw
- * the live generated sprite in the GUI.
+ * Client-side helpers used by the Creator screen to draw the live generated
+ * sprite in the GUI. Item rendering falls back to packaged item models on
+ * modern Fabric versions where the old builtin item renderer hook was removed.
  */
 @Environment(EnvType.CLIENT)
 public class DynamicModelProvider {

@@ -240,11 +240,13 @@ public final class RuntimeTextureManager {
 
     private static Map<String, Integer> extractInputColors(String inputA, String inputB) {
         Map<String, Integer> colors = new HashMap<>();
-        if (inputA != null && ITEM_COLORS.containsKey(inputA)) {
-            colors.put(inputA, ITEM_COLORS.get(inputA));
+        String keyA = normalise(inputA);
+        String keyB = normalise(inputB);
+        if (keyA != null && ITEM_COLORS.containsKey("minecraft:" + keyA)) {
+            colors.put("minecraft:" + keyA, ITEM_COLORS.get("minecraft:" + keyA));
         }
-        if (inputB != null && ITEM_COLORS.containsKey(inputB)) {
-            colors.put(inputB, ITEM_COLORS.get(inputB));
+        if (keyB != null && ITEM_COLORS.containsKey("minecraft:" + keyB)) {
+            colors.put("minecraft:" + keyB, ITEM_COLORS.get("minecraft:" + keyB));
         }
         return colors;
     }
