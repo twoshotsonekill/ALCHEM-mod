@@ -2,6 +2,7 @@ package com.alchemod.block;
 
 import com.alchemod.AlchemodInit;
 import com.alchemod.ai.OpenRouterClient;
+import com.alchemod.ai.SpriteToolClient;
 import com.alchemod.creator.DynamicItem;
 import com.alchemod.creator.DynamicItemRegistry;
 import com.alchemod.screen.CreatorScreenHandler;
@@ -155,6 +156,19 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
                 });
     }
 
+    // ── AI request ────────────────────────────────────────────────────────────
+
+    /**
+     * Makes two sequential AI requests:
+     * <ol>
+     *   <li>Item metadata (name, effects, behavior script, …) via the existing chat API.</li>
+     *   <li>Sprite drawing commands via {@link SpriteToolClient} — the model is forced to
+     *       call the {@code draw_sprite} tool, returning structured JSON that the client
+     *       can render without any further network calls.</li>
+     * </ol>
+     * A failure in the sprite call is non-fatal; the item will still be created with the
+     * procedural glyph texture as a fallback.
+     */
     private CreationResult queryOpenRouter(String itemA, String itemB, boolean allowBehaviorCode) {
         String system = buildSystemPrompt(allowBehaviorCode);
         String user = "Create a new magical item by combining: " + itemA + " + " + itemB;
@@ -174,8 +188,43 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
             return CreationResult.error(result.error());
         }
 
-        return parseCreationResult(result.rawBody() != null ? result.rawBody() : result.content(), allowBehaviorCode);
+        CreationResult metadata = parseCreationResult(
+                result.rawBody() != null ? result.rawBody() : result.content(),
+                allowBehaviorCode);
+        if (metadata.error() != null) {
+            return metadata;
+        }
+
+        // Second call — generate sprite drawing commands via tool use.
+        // Returns null on any failure; the glyph fallback will be used instead.
+        String spriteCommands = null;
+        try {
+            spriteCommands = SpriteToolClient.generateSprite(
+                    AlchemodInit.OPENROUTER_KEY,
+                    AlchemodInit.CONFIG.creatorModel(),
+                    metadata.name(),
+                    metadata.description(),
+                    metadata.rarity(),
+                    metadata.itemType(),
+                    AlchemodInit.CONFIG.creatorTimeoutSeconds());
+            if (spriteCommands != null) {
+                AlchemodInit.LOG.info("[Creator] Sprite commands ready for '{}'.", metadata.name());
+            } else {
+                AlchemodInit.LOG.warn("[Creator] Sprite tool call returned nothing — using glyph fallback.");
+            }
+        } catch (Exception e) {
+            AlchemodInit.LOG.warn("[Creator] Sprite tool call failed: {}", e.getMessage());
+        }
+
+        return new CreationResult(
+                metadata.name(), metadata.description(), metadata.spritePrompt(),
+                metadata.rarity(), metadata.itemType(), metadata.effects(),
+                metadata.special(), metadata.mobType(), metadata.behaviorScript(),
+                spriteCommands,
+                null);
     }
+
+    // ── System prompt ─────────────────────────────────────────────────────────
 
     private String buildSystemPrompt(boolean allowBehaviorCode) {
         String basePrompt = """
@@ -255,6 +304,8 @@ Script rules:
 """;
     }
 
+    // ── Parse metadata response ───────────────────────────────────────────────
+
     private CreationResult parseCreationResult(String apiBody, boolean allowBehaviorCode) {
         try {
             String content = OpenRouterClient.extractContent(apiBody);
@@ -321,6 +372,8 @@ Script rules:
                 behaviorScript = buildFallbackScript(name, rarity, itemType, effects, special, mobType);
             }
 
+            // spriteCommands is always null here — it gets filled in by queryOpenRouter
+            // after the second API call completes.
             return new CreationResult(
                     name,
                     description,
@@ -331,12 +384,15 @@ Script rules:
                     special,
                     mobType,
                     behaviorScript,
+                    null,
                     null);
         } catch (JsonSyntaxException | IllegalStateException e) {
             AlchemodInit.LOG.warn("[Creator] Failed to parse AI JSON: {}", e.getMessage());
             return CreationResult.error("Invalid AI JSON");
         }
     }
+
+    // ── Sanitisation helpers ──────────────────────────────────────────────────
 
     private List<String> sanitiseEffects(List<String> inputEffects) {
         List<String> cleanEffects = new ArrayList<>();
@@ -366,6 +422,8 @@ Script rules:
         String normalised = normalise(value);
         return VALID_MOBS.contains(normalised) ? normalised : "bat";
     }
+
+    // ── Apply result on server thread ─────────────────────────────────────────
 
     private void applyResult(CreationResult result, String inputIdA, String inputIdB) {
         aiPending = false;
@@ -423,6 +481,13 @@ Script rules:
         if (result.behaviorScript() != null && !result.behaviorScript().isBlank()) {
             tag.putString("creator_script", result.behaviorScript());
         }
+        // Store draw_sprite tool output so the client can render the sprite
+        // without any further network calls.  RuntimeTextureManager checks
+        // creator_sprite_commands first; if present and valid it renders
+        // immediately via SpriteCommandRenderer (no Pollinations download).
+        if (result.spriteCommands() != null && !result.spriteCommands().isBlank()) {
+            tag.putString("creator_sprite_commands", result.spriteCommands());
+        }
         output.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(tag));
 
         items.set(SLOT_OUTPUT, output);
@@ -431,6 +496,8 @@ Script rules:
         state = STATE_READY;
         markDirty();
     }
+
+    // ── Public API ────────────────────────────────────────────────────────────
 
     public void onOutputTaken() {
         state = STATE_IDLE;
@@ -450,6 +517,8 @@ Script rules:
         return items;
     }
 
+    // ── NamedScreenHandlerFactory ─────────────────────────────────────────────
+
     @Override
     public ScreenHandler createMenu(int syncId, PlayerInventory inventory, PlayerEntity player) {
         return new CreatorScreenHandler(syncId, inventory, this, delegate, getPos());
@@ -459,6 +528,8 @@ Script rules:
     public Text getDisplayName() {
         return Text.translatable("block.alchemod.item_creator");
     }
+
+    // ── Inventory ─────────────────────────────────────────────────────────────
 
     @Override
     public int size() {
@@ -505,6 +576,8 @@ Script rules:
         items.clear();
     }
 
+    // ── NBT ───────────────────────────────────────────────────────────────────
+
     @Override
     protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
         super.writeNbt(nbt, lookup);
@@ -526,6 +599,8 @@ Script rules:
             progress = 0;
         }
     }
+
+    // ── JSON helpers ──────────────────────────────────────────────────────────
 
     private static String stripCodeFence(String value) {
         String trimmed = value == null ? "" : value.trim();
@@ -550,38 +625,13 @@ Script rules:
 
         for (int index = 0; index < content.length(); index++) {
             char current = content.charAt(index);
-            if (escaped) {
-                escaped = false;
-                continue;
-            }
-
-            if (current == '\\') {
-                escaped = true;
-                continue;
-            }
-
-            if (current == '"') {
-                inString = !inString;
-                continue;
-            }
-
-            if (inString) {
-                continue;
-            }
-
-            if (current == '{') {
-                if (depth == 0) {
-                    start = index;
-                }
-                depth++;
-            } else if (current == '}') {
-                depth--;
-                if (depth == 0 && start >= 0) {
-                    return content.substring(start, index + 1);
-                }
-            }
+            if (escaped) { escaped = false; continue; }
+            if (current == '\\') { escaped = true; continue; }
+            if (current == '"') { inString = !inString; continue; }
+            if (inString) continue;
+            if (current == '{') { if (depth == 0) start = index; depth++; }
+            else if (current == '}') { depth--; if (depth == 0 && start >= 0) return content.substring(start, index + 1); }
         }
-
         return null;
     }
 
@@ -592,24 +642,17 @@ Script rules:
 
     private static String getNullableString(JsonObject object, String key) {
         JsonElement element = object.get(key);
-        if (element == null || element.isJsonNull()) {
-            return null;
-        }
+        if (element == null || element.isJsonNull()) return null;
         String value = element.getAsString().trim();
         return value.isBlank() || "null".equalsIgnoreCase(value) ? null : value;
     }
 
     private static List<String> getStringList(JsonObject object, String key) {
         JsonElement element = object.get(key);
-        if (element == null || !element.isJsonArray()) {
-            return List.of();
-        }
-
+        if (element == null || !element.isJsonArray()) return List.of();
         List<String> values = new ArrayList<>();
         for (JsonElement item : element.getAsJsonArray()) {
-            if (item != null && !item.isJsonNull()) {
-                values.add(item.getAsString());
-            }
+            if (item != null && !item.isJsonNull()) values.add(item.getAsString());
         }
         return values;
     }
@@ -619,53 +662,41 @@ Script rules:
     }
 
     private static String fallbackSpecial(String effect, String itemType) {
-        if ("bow".equals(itemType)) {
-            return "ignite";
-        }
-        if ("throwable".equals(itemType)) {
-            return "lightning";
-        }
-        if ("spawn_egg".equals(itemType)) {
-            return "phase";
-        }
-
+        if ("bow".equals(itemType)) return "ignite";
+        if ("throwable".equals(itemType)) return "lightning";
+        if ("spawn_egg".equals(itemType)) return "phase";
         return switch (effect) {
-            case "strength" -> "knockback";
-            case "speed" -> "void_step";
-            case "regeneration" -> "heal_aura";
-            case "jump_boost" -> "launch";
+            case "strength"      -> "knockback";
+            case "speed"         -> "void_step";
+            case "regeneration"  -> "heal_aura";
+            case "jump_boost"    -> "launch";
             case "fire_resistance" -> "ignite";
-            case "night_vision" -> "phase";
+            case "night_vision"  -> "phase";
             case "water_breathing" -> "freeze";
-            case "haste" -> "lightning";
-            default -> "drain";
+            case "haste"         -> "lightning";
+            default              -> "drain";
         };
     }
 
-    private static String buildFallbackScript(String name, String rarity, String itemType, List<String> effects, String special, String mobType) {
+    private static String buildFallbackScript(String name, String rarity, String itemType,
+            List<String> effects, String special, String mobType) {
         int duration = switch (rarity) {
             case "uncommon" -> 240;
-            case "rare" -> 320;
-            case "epic" -> 420;
-            case "legendary" -> 520;
-            default -> 180;
+            case "rare"     -> 320;
+            case "epic"     -> 420;
+            case "legendary"-> 520;
+            default         -> 180;
         };
         int amplifier = switch (rarity) {
-            case "rare" -> 1;
+            case "rare"              -> 1;
             case "epic", "legendary" -> 2;
-            default -> 0;
+            default                  -> 0;
         };
 
         StringBuilder builder = new StringBuilder();
         builder.append("function onUse(player, world) {\n");
         for (String effect : effects) {
-            builder.append("  player.addEffect('")
-                    .append(effect)
-                    .append("', ")
-                    .append(duration)
-                    .append(", ")
-                    .append(amplifier)
-                    .append(");\n");
+            builder.append("  player.addEffect('").append(effect).append("', ").append(duration).append(", ").append(amplifier).append(");\n");
         }
 
         switch (itemType) {
@@ -686,57 +717,40 @@ Script rules:
             case "spawn_egg" -> {
                 if (mobType != null && !mobType.isBlank()) {
                     builder.append("  var look = player.getLookDir();\n")
-                            .append("  world.spawnMob('")
-                            .append(escapeForSingleQuotedScript(mobType))
+                            .append("  world.spawnMob('").append(escapeForSingleQuotedScript(mobType))
                             .append("', player.getX() + look[0] * 2, player.getY(), player.getZ() + look[2] * 2);\n")
                             .append("  world.playSound('entity.evoker.prepare_summon', 0.8, 1.1);\n");
                 }
             }
-            case "food" -> builder.append("  player.heal(")
-                    .append(Set.of("epic", "legendary").contains(rarity) ? "6" : "3")
-                    .append(");\n")
-                    .append("  world.playSound('entity.generic.eat', 0.7, 1.4);\n");
+            case "food"  -> builder.append("  player.heal(").append(Set.of("epic", "legendary").contains(rarity) ? "6" : "3")
+                    .append(");\n").append("  world.playSound('entity.generic.eat', 0.7, 1.4);\n");
             case "totem" -> builder.append("  player.addEffect('absorption', 240, ")
                     .append(Set.of("epic", "legendary").contains(rarity) ? "1" : "0")
-                    .append(");\n")
-                    .append("  world.playSound('item.totem.use', 0.7, 1.1);\n");
-            default -> {
-            }
+                    .append(");\n").append("  world.playSound('item.totem.use', 0.7, 1.1);\n");
+            default -> {}
         }
 
         if (special != null) {
             switch (special) {
-                case "ignite" -> builder.append("  var targets = nearbyEntities(6);\n")
-                        .append("  for (var i = 0; i < targets.length; i++) { targets[i].setOnFire(6); }\n");
-                case "knockback" -> builder.append("  var targets = nearbyEntities(6);\n")
-                        .append("  for (var i = 0; i < targets.length; i++) { targets[i].knockbackFrom(3); }\n");
+                case "ignite"    -> builder.append("  var targets = nearbyEntities(6);\n").append("  for (var i = 0; i < targets.length; i++) { targets[i].setOnFire(6); }\n");
+                case "knockback" -> builder.append("  var targets = nearbyEntities(6);\n").append("  for (var i = 0; i < targets.length; i++) { targets[i].knockbackFrom(3); }\n");
                 case "heal_aura" -> builder.append("  player.heal(6);\n");
-                case "launch" -> builder.append("  player.addVelocity(0, 1.2, 0);\n");
-                case "freeze" -> builder.append("  var targets = nearbyEntities(7);\n")
-                        .append("  for (var i = 0; i < targets.length; i++) { targets[i].addEffect('slowness', 180, 2); }\n");
-                case "drain" -> builder.append("  var targets = nearbyEntities(7);\n")
-                        .append("  for (var i = 0; i < targets.length; i++) { targets[i].damage(5); }\n")
-                        .append("  player.heal(4);\n");
-                case "phase" -> builder.append("  player.addEffect('invisibility', 160, 0);\n");
-                case "lightning" -> builder.append("  var targets = nearbyEntities(8);\n")
-                        .append("  for (var i = 0; i < targets.length; i++) { world.spawnLightning(targets[i].getX(), targets[i].getY(), targets[i].getZ()); }\n");
-                case "void_step" -> builder.append("  player.addEffect('slow_falling', 200, 0);\n")
-                        .append("  player.addVelocity(0, 0.8, 0);\n");
-                default -> {
-                }
+                case "launch"    -> builder.append("  player.addVelocity(0, 1.2, 0);\n");
+                case "freeze"    -> builder.append("  var targets = nearbyEntities(7);\n").append("  for (var i = 0; i < targets.length; i++) { targets[i].addEffect('slowness', 180, 2); }\n");
+                case "drain"     -> builder.append("  var targets = nearbyEntities(7);\n").append("  for (var i = 0; i < targets.length; i++) { targets[i].damage(5); }\n").append("  player.heal(4);\n");
+                case "phase"     -> builder.append("  player.addEffect('invisibility', 160, 0);\n");
+                case "lightning" -> builder.append("  var targets = nearbyEntities(8);\n").append("  for (var i = 0; i < targets.length; i++) { world.spawnLightning(targets[i].getX(), targets[i].getY(), targets[i].getZ()); }\n");
+                case "void_step" -> builder.append("  player.addEffect('slow_falling', 200, 0);\n").append("  player.addVelocity(0, 0.8, 0);\n");
+                default -> {}
             }
         }
 
         if ("common".equals(rarity) && effects.isEmpty() && special == null && !"spawn_egg".equals(itemType)) {
             builder.append("  world.playSound('entity.item.pickup', 0.6, 1.8);\n")
-                    .append("  player.sendMessage('")
-                    .append(escapeForSingleQuotedScript(name))
-                    .append(" squeaks, rattles, and does very little.');\n");
+                    .append("  player.sendMessage('").append(escapeForSingleQuotedScript(name)).append(" squeaks, rattles, and does very little.');\n");
         }
 
-        builder.append("  player.sendMessage('")
-                .append(escapeForSingleQuotedScript(name))
-                .append(" does something strange.');\n");
+        builder.append("  player.sendMessage('").append(escapeForSingleQuotedScript(name)).append(" does something strange.');\n");
         builder.append("  world.playSound('block.beacon.activate', 0.7, 1.2);\n");
         builder.append("}\n");
         return builder.toString();
@@ -746,6 +760,13 @@ Script rules:
         return value.replace("\\", "\\\\").replace("'", "\\'");
     }
 
+    // ── CreationResult record ─────────────────────────────────────────────────
+
+    /**
+     * Internal transfer object that carries both the item metadata (from call 1)
+     * and the raw sprite-commands JSON string (from call 2).
+     * {@code spriteCommands} may be {@code null} if the tool call failed or timed out.
+     */
     record CreationResult(
             String name,
             String description,
@@ -756,10 +777,12 @@ Script rules:
             String special,
             String mobType,
             String behaviorScript,
+            String spriteCommands,
             String error
     ) {
         static CreationResult error(String message) {
-            return new CreationResult(null, null, null, null, "use_item", List.of(), null, null, null, message);
+            return new CreationResult(null, null, null, null, "use_item",
+                    List.of(), null, null, null, null, message);
         }
     }
 }
