@@ -64,6 +64,10 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
     private int completedPlacements = 0;
     private static final int PLACEMENTS_PER_TICK = 256;
 
+    // Per-player cooldown to prevent API cost abuse
+    private long lastPromptTime = 0;
+    private static final long COOLDOWN_MS = 30_000;  // 30 seconds
+
     private final PropertyDelegate delegate = new PropertyDelegate() {
         @Override
         public int get(int index) {
@@ -143,10 +147,33 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
 
     private long completedTime = 0;
 
+    @Override
+    public void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registries) {
+        super.readNbt(nbt, registries);
+        lastPromptTime = nbt.getLong("lastPromptTime");
+    }
+
+    @Override
+    protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registries) {
+        super.writeNbt(nbt, registries);
+        nbt.putLong("lastPromptTime", lastPromptTime);
+    }
+
     public void startBuild(String prompt, World world) {
         if (aiPending || prompt == null || prompt.isBlank()) {
             return;
         }
+
+        // Check cooldown
+        long now = System.currentTimeMillis();
+        if (now - lastPromptTime < COOLDOWN_MS) {
+            long remainingMs = COOLDOWN_MS - (now - lastPromptTime);
+            long remainingSeconds = (remainingMs + 999) / 1000;  // Round up
+            AlchemodInit.LOG.info("[Builder] Cooldown active: {} seconds remaining", remainingSeconds);
+            return;
+        }
+
+        lastPromptTime = now;
 
         promptText = prompt.trim();
         aiPending = true;
@@ -168,6 +195,15 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
         if (prompt != null && !prompt.isBlank()) {
             startBuild(prompt, world);
         }
+    }
+
+    public boolean isOnCooldown() {
+        return System.currentTimeMillis() - lastPromptTime < COOLDOWN_MS;
+    }
+
+    public long getRemainingCooldownMs() {
+        long remaining = COOLDOWN_MS - (System.currentTimeMillis() - lastPromptTime);
+        return Math.max(0, remaining);
     }
 
     public String getLastBuildPlan() {
