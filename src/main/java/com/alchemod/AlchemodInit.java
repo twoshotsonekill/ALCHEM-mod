@@ -9,9 +9,8 @@ import com.alchemod.block.ForgeBlock;
 import com.alchemod.block.ForgeBlockEntity;
 import com.alchemod.creator.DynamicItemRegistry;
 import com.alchemod.event.ItemAbilityEvents;
-import com.alchemod.network.BuilderModePayload;
 import com.alchemod.network.BuilderPromptPayload;
-import com.alchemod.network.CreatorSettingsPayload;
+import com.alchemod.network.ForgeNbtPayload;
 import com.alchemod.screen.BuilderScreenHandler;
 import com.alchemod.screen.CreatorScreenHandler;
 import com.alchemod.screen.ForgeScreenHandler;
@@ -132,23 +131,25 @@ public class AlchemodInit implements ModInitializer {
                 BuilderPromptPayload.ID,
                 BuilderPromptPayload.CODEC);
         net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playC2S().register(
-                BuilderModePayload.ID,
-                BuilderModePayload.CODEC);
-        net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playC2S().register(
-                CreatorSettingsPayload.ID,
-                CreatorSettingsPayload.CODEC);
+                ForgeNbtPayload.ID,
+                ForgeNbtPayload.CODEC);
 
         net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(
                 BuilderPromptPayload.ID, (payload, context) -> {
                     context.server().execute(() -> {
                         var player = context.player();
                         var world = player.getServerWorld();
-                        var be = world.getBlockEntity(payload.pos());
+                        var targetPos = payload.pos();
+                        if (player.currentScreenHandler instanceof BuilderScreenHandler builderHandler
+                                && builderHandler.getBlockPos() != null) {
+                            targetPos = builderHandler.getBlockPos();
+                        }
+                        var be = world.getBlockEntity(targetPos);
                         if (be instanceof BuilderBlockEntity builder) {
                             double dist = player.squaredDistanceTo(
-                                    payload.pos().getX() + 0.5,
-                                    payload.pos().getY() + 0.5,
-                                    payload.pos().getZ() + 0.5);
+                                    targetPos.getX() + 0.5,
+                                    targetPos.getY() + 0.5,
+                                    targetPos.getZ() + 0.5);
                             if (dist <= 64.0) {
                                 builder.receivePrompt(payload.prompt(), world);
                             } else {
@@ -159,36 +160,22 @@ public class AlchemodInit implements ModInitializer {
                 });
 
         net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(
-                BuilderModePayload.ID, (payload, context) -> {
+                ForgeNbtPayload.ID, (payload, context) -> {
                     context.server().execute(() -> {
                         var player = context.player();
-                        var world = player.getServerWorld();
-                        var be = world.getBlockEntity(payload.pos());
-                        if (be instanceof BuilderBlockEntity builder) {
+                        if (player.currentScreenHandler instanceof ForgeScreenHandler forgeHandler
+                                && forgeHandler.getInventory() instanceof ForgeBlockEntity forge) {
                             double dist = player.squaredDistanceTo(
-                                    payload.pos().getX() + 0.5,
-                                    payload.pos().getY() + 0.5,
-                                    payload.pos().getZ() + 0.5);
+                                    forge.getPos().getX() + 0.5,
+                                    forge.getPos().getY() + 0.5,
+                                    forge.getPos().getZ() + 0.5);
                             if (dist <= 64.0) {
-                                builder.setBuilderMode(payload.mode());
-                            }
-                        }
-                    });
-                });
-
-        net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(
-                CreatorSettingsPayload.ID, (payload, context) -> {
-                    context.server().execute(() -> {
-                        var player = context.player();
-                        var world = player.getServerWorld();
-                        var be = world.getBlockEntity(payload.pos());
-                        if (be instanceof CreatorBlockEntity creator) {
-                            double dist = player.squaredDistanceTo(
-                                    payload.pos().getX() + 0.5,
-                                    payload.pos().getY() + 0.5,
-                                    payload.pos().getZ() + 0.5);
-                            if (dist <= 64.0) {
-                                creator.setBehaviorCodeEnabled(payload.behaviorCodeEnabled());
+                                forge.applyCustomData(
+                                        payload.customName(),
+                                        payload.customLore(),
+                                        payload.customColor(),
+                                        payload.customEnchantments(),
+                                        payload.hideFlags());
                             }
                         }
                     });

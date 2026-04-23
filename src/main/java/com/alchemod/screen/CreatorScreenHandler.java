@@ -47,7 +47,7 @@ public class CreatorScreenHandler extends ScreenHandler {
     }
 
     public CreatorScreenHandler(int syncId, PlayerInventory playerInventory) {
-        this(syncId, playerInventory, new SimpleInventory(3), new ArrayPropertyDelegate(4), null);
+        this(syncId, playerInventory, new SimpleInventory(3), new ArrayPropertyDelegate(3), null);
     }
 
     public int getState() {
@@ -63,7 +63,7 @@ public class CreatorScreenHandler extends ScreenHandler {
     }
 
     public boolean isBehaviorCodeEnabled() {
-        return delegate.get(3) != 0;
+        return true;
     }
 
     public BlockPos getBlockPos() {

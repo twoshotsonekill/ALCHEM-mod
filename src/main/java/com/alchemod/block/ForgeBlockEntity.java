@@ -2,8 +2,15 @@ package com.alchemod.block;
 
 import com.alchemod.AlchemodInit;
 import com.alchemod.screen.ForgeScreenHandler;
+import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.DyedColorComponent;
+import net.minecraft.component.type.ItemEnchantmentsComponent;
+import net.minecraft.component.type.LoreComponent;
+import net.minecraft.component.type.NbtComponent;
+import net.minecraft.enchantment.Enchantment;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.inventory.Inventories;
@@ -13,13 +20,18 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.registry.Registries;
+import net.minecraft.registry.Registry;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
 import net.minecraft.registry.RegistryWrapper;
+import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.screen.ArrayPropertyDelegate;
 import net.minecraft.screen.NamedScreenHandlerFactory;
 import net.minecraft.screen.PropertyDelegate;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.Unit;
 import net.minecraft.util.collection.DefaultedList;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
@@ -262,31 +274,77 @@ public class ForgeBlockEntity extends BlockEntity
 
     // NBT getter/setter for custom properties
     public String getCustomName() { return customName; }
-    public void setCustomName(String name) { this.customName = name; }
+    public void setCustomName(String name) {
+        customName = sanitiseText(name);
+        markDirty();
+    }
     public String getCustomLore() { return customLore; }
-    public void setCustomLore(String lore) { this.customLore = lore; }
+    public void setCustomLore(String lore) {
+        customLore = sanitiseText(lore);
+        markDirty();
+    }
     public int getCustomColor() { return customColor; }
-    public void setCustomColor(int color) { this.customColor = color; }
+    public void setCustomColor(int color) {
+        customColor = sanitiseColor(color);
+        markDirty();
+    }
     public List<String> getCustomEnchantments() { return customEnchantments; }
-    public void setCustomEnchantments(List<String> ench) { this.customEnchantments = ench; }
+    public void setCustomEnchantments(List<String> ench) {
+        customEnchantments = sanitiseEnchantments(ench);
+        markDirty();
+    }
     public int getHideFlags() { return hideFlags; }
-    public void setHideFlags(int flags) { this.hideFlags = flags; }
+    public void setHideFlags(int flags) {
+        hideFlags = Math.max(flags, 0);
+        markDirty();
+    }
+
+    public void applyCustomData(String name, String lore, int color, List<String> enchantments, int flags) {
+        customName = sanitiseText(name);
+        customLore = sanitiseText(lore);
+        customColor = sanitiseColor(color);
+        customEnchantments = sanitiseEnchantments(enchantments);
+        hideFlags = Math.max(flags, 0);
+        markDirty();
+    }
 
     private void applyNbtToStack(ItemStack stack) {
         NbtCompound tag = new NbtCompound();
+        NbtCompound forgeTag = new NbtCompound();
         if (!customName.isBlank()) {
-            tag.putString("display_name", customName);
+            stack.set(DataComponentTypes.CUSTOM_NAME, Text.literal(customName));
+            forgeTag.putString("display_name", customName);
         }
         if (!customLore.isBlank()) {
-            tag.putString("display_lore", customLore);
+            List<Text> loreLines = parseLoreLines(customLore);
+            if (!loreLines.isEmpty()) {
+                stack.set(DataComponentTypes.LORE, new LoreComponent(loreLines));
+            }
+            forgeTag.putString("display_lore", customLore);
         }
         if (customColor != -1) {
-            tag.putInt("display_color", customColor);
+            stack.set(DataComponentTypes.DYED_COLOR, new DyedColorComponent(customColor, hideFlags == 0));
+            forgeTag.putInt("display_color", customColor);
         }
         if (!customEnchantments.isEmpty()) {
-            tag.putString("enchantments", String.join(",", customEnchantments));
+            ItemEnchantmentsComponent enchantments = buildEnchantments();
+            if (enchantments != null && !enchantments.isEmpty()) {
+                if (hideFlags != 0) {
+                    enchantments = enchantments.withShowInTooltip(false);
+                }
+                stack.set(DataComponentTypes.ENCHANTMENTS, enchantments);
+            }
+            forgeTag.putString("enchantments", String.join(",", customEnchantments));
         }
-        tag.putInt("hide_flags", hideFlags);
+        if (hideFlags != 0) {
+            stack.set(DataComponentTypes.HIDE_ADDITIONAL_TOOLTIP, Unit.INSTANCE);
+            forgeTag.putInt("hide_flags", hideFlags);
+        }
+
+        if (!forgeTag.isEmpty()) {
+            tag.put("alchemod_forge", forgeTag);
+            stack.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(tag));
+        }
     }
 
     // ── NBT ───────────────────────────────────────────────────────────────────
@@ -315,6 +373,8 @@ public class ForgeBlockEntity extends BlockEntity
         String enchStr = nbt.getString("CustomEnchantments");
         if (!enchStr.isBlank()) {
             customEnchantments = new ArrayList<>(List.of(enchStr.split(",")));
+        } else {
+            customEnchantments = new ArrayList<>();
         }
         hideFlags = nbt.getInt("HideFlags");
         // If it was mid-process when the world saved, reset so it retries
@@ -322,8 +382,123 @@ public class ForgeBlockEntity extends BlockEntity
     }
 
     // ── Util ──────────────────────────────────────────────────────────────────
+    @Override
+    public void markDirty() {
+        super.markDirty();
+        if (world != null) {
+            world.updateListeners(pos, getCachedState(), getCachedState(), Block.NOTIFY_LISTENERS);
+        }
+    }
+
+    private ItemEnchantmentsComponent buildEnchantments() {
+        if (world == null || customEnchantments.isEmpty()) {
+            return null;
+        }
+
+        Registry<Enchantment> registry = world.getRegistryManager().getOrThrow(RegistryKeys.ENCHANTMENT);
+        ItemEnchantmentsComponent.Builder builder = new ItemEnchantmentsComponent.Builder(ItemEnchantmentsComponent.DEFAULT);
+        boolean addedAny = false;
+
+        for (String spec : customEnchantments) {
+            ParsedEnchantment parsed = parseEnchantment(spec);
+            if (parsed == null) {
+                continue;
+            }
+
+            java.util.Optional<RegistryEntry.Reference<Enchantment>> entry = registry.getEntry(parsed.id());
+            if (entry.isPresent()) {
+                builder.add(entry.get(), parsed.level());
+                addedAny = true;
+            } else {
+                AlchemodInit.LOG.warn("[Alchemod] Unknown enchantment '{}'", parsed.id());
+            }
+        }
+
+        return addedAny ? builder.build() : null;
+    }
+
+    private static ParsedEnchantment parseEnchantment(String spec) {
+        if (spec == null || spec.isBlank()) {
+            return null;
+        }
+
+        String trimmed = spec.trim();
+        int level = 1;
+        String idPart = trimmed;
+
+        int atIndex = trimmed.lastIndexOf('@');
+        if (atIndex > 0 && atIndex < trimmed.length() - 1) {
+            idPart = trimmed.substring(0, atIndex).trim();
+            level = parsePositiveInt(trimmed.substring(atIndex + 1).trim(), 1);
+        } else {
+            String[] parts = trimmed.split("\\s+");
+            if (parts.length >= 2 && parts[parts.length - 1].chars().allMatch(Character::isDigit)) {
+                level = parsePositiveInt(parts[parts.length - 1], 1);
+                idPart = String.join(" ", java.util.Arrays.copyOf(parts, parts.length - 1)).trim();
+            }
+        }
+
+        Identifier id = Identifier.tryParse(idPart);
+        if (id == null) {
+            id = Identifier.tryParse("minecraft:" + idPart);
+        }
+        if (id == null) {
+            return null;
+        }
+
+        return new ParsedEnchantment(id, Math.max(1, level));
+    }
+
+    private static List<Text> parseLoreLines(String lore) {
+        List<Text> lines = new ArrayList<>();
+        String[] splitLines = lore.replace("\\n", "|").split("\\|");
+        for (String line : splitLines) {
+            String trimmed = line.trim();
+            if (!trimmed.isBlank()) {
+                lines.add(Text.literal(trimmed));
+            }
+        }
+        return lines;
+    }
+
+    private static String sanitiseText(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private static int sanitiseColor(int value) {
+        return value < 0 ? -1 : value & 0xFFFFFF;
+    }
+
+    private static List<String> sanitiseEnchantments(List<String> enchantments) {
+        List<String> clean = new ArrayList<>();
+        if (enchantments == null) {
+            return clean;
+        }
+
+        for (String enchantment : enchantments) {
+            if (enchantment != null) {
+                String trimmed = enchantment.trim();
+                if (!trimmed.isBlank()) {
+                    clean.add(trimmed);
+                }
+            }
+        }
+        return clean;
+    }
+
+    private static int parsePositiveInt(String value, int fallback) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
     private static String quoted(String s) {
         return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"")
                         .replace("\n", "\\n").replace("\r", "") + "\"";
+    }
+
+    private record ParsedEnchantment(Identifier id, int level) {
     }
 }

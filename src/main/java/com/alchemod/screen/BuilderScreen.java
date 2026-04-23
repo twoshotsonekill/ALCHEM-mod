@@ -2,12 +2,10 @@ package com.alchemod.screen;
 
 import com.alchemod.AlchemodInit;
 import com.alchemod.block.BuilderBlockEntity;
-import com.alchemod.network.BuilderModePayload;
 import com.alchemod.network.BuilderPromptPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.entity.player.PlayerInventory;
@@ -18,10 +16,11 @@ import net.minecraft.util.math.BlockPos;
 public class BuilderScreen extends HandledScreen<BuilderScreenHandler> {
 
     private static final Identifier BG = Identifier.ofVanilla("textures/gui/container/furnace.png");
+    private static final int PANEL_BG = 0xCC111827;
+    private static final int PANEL_SOFT = 0xAA1F2937;
+    private static final int ACCENT = 0xCC22C55E;
 
     private TextFieldWidget promptField;
-    private ButtonWidget modeToggleButton;
-    private boolean isTextMode;
 
     public BuilderScreen(BuilderScreenHandler handler, PlayerInventory inventory, Text title) {
         super(handler, inventory, title);
@@ -33,27 +32,29 @@ public class BuilderScreen extends HandledScreen<BuilderScreenHandler> {
     protected void init() {
         super.init();
         titleX = (backgroundWidth - textRenderer.getWidth(title)) / 2;
-        isTextMode = handler.getMode() == BuilderBlockEntity.MODE_TEXT;
-
-        modeToggleButton = ButtonWidget.builder(Text.empty(), button -> toggleMode())
-                .dimensions(x + 98, y + 4, 76, 20)
-                .build();
-        updateModeButton();
-        addDrawableChild(modeToggleButton);
-
-        promptField = new TextFieldWidget(textRenderer, x + 10, y + 30, 156, 18, Text.literal("Builder Prompt"));
+        promptField = new TextFieldWidget(textRenderer, x + 14, y + 31, 148, 18, Text.literal("Builder Prompt"));
         promptField.setMaxLength(512);
+        promptField.setDrawsBackground(false);
         promptField.setPlaceholder(Text.literal("Describe the subject, mood, materials, scale, and scene"));
+        promptField.setFocused(true);
         addSelectableChild(promptField);
         setInitialFocus(promptField);
+        setFocused(promptField);
+    }
+
+    @Override
+    protected void handledScreenTick() {
+        super.handledScreenTick();
+        if (promptField != null && !promptField.isFocused()) {
+            promptField.setFocused(true);
+            setFocused(promptField);
+        }
     }
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         super.render(context, mouseX, mouseY, delta);
-        if (isTextMode) {
-            promptField.render(context, mouseX, mouseY, delta);
-        }
+        promptField.render(context, mouseX, mouseY, delta);
         drawMouseoverTooltip(context, mouseX, mouseY);
     }
 
@@ -61,6 +62,16 @@ public class BuilderScreen extends HandledScreen<BuilderScreenHandler> {
     protected void drawBackground(DrawContext context, float delta, int mouseX, int mouseY) {
         context.drawTexture(RenderLayer::getGuiTextured, BG,
                 x, y, 0, 0, backgroundWidth, backgroundHeight, 256, 256);
+
+        context.fill(x + 8, y + 4, x + backgroundWidth - 8, y + 24, PANEL_BG);
+        context.fill(x + 12, y + 27, x + backgroundWidth - 12, y + 52, PANEL_SOFT);
+        context.fill(x + 12, y + 54, x + backgroundWidth - 12, y + 78, PANEL_BG);
+        context.fill(x + 12, y + 27, x + 14, y + 52, ACCENT);
+        context.fill(x + 12, y + 54, x + 14, y + 78, ACCENT);
+        context.fill(x + 20, y + 54, x + 68, y + 74, 0xE5162230);
+        context.fill(x + 108, y + 54, x + 156, y + 74, 0xE5162230);
+        context.fill(x + 24, y + 34, x + 152, y + 35, 0x55FFFFFF);
+        context.fill(x + 20, y + 47, x + 156, y + 48, 0x2234D399);
 
         int state = handler.getState();
         int progress = handler.getProgress();
@@ -77,12 +88,10 @@ public class BuilderScreen extends HandledScreen<BuilderScreenHandler> {
 
     @Override
     protected void drawForeground(DrawContext context, int mouseX, int mouseY) {
-        context.drawText(textRenderer, title, titleX, titleY, 0x404040, false);
+        context.drawText(textRenderer, title, titleX, titleY, 0xF3F4F6, false);
 
         String status = switch (handler.getState()) {
-            case BuilderBlockEntity.STATE_IDLE -> isTextMode
-                    ? "Describe a large build and press Enter"
-                    : "Insert two items to inspire a large build";
+            case BuilderBlockEntity.STATE_IDLE -> "Describe a build and press Enter";
             case BuilderBlockEntity.STATE_PROCESSING -> "Planning the structure...";
             case BuilderBlockEntity.STATE_BUILDING -> "Placing blocks...";
             case BuilderBlockEntity.STATE_COMPLETE -> "Build complete";
@@ -96,24 +105,29 @@ public class BuilderScreen extends HandledScreen<BuilderScreenHandler> {
             default -> 0x888888;
         };
         int textX = (backgroundWidth - textRenderer.getWidth(status)) / 2;
-        context.drawText(textRenderer, status, textX, 55, color, false);
+        context.drawText(textRenderer, status, textX, 58, color, false);
+        context.drawText(textRenderer, "Prompt", 18, 19, 0x9CA3AF, false);
         String summary = getBuildPlanSummary();
         context.drawText(textRenderer,
                 summary.isBlank()
-                        ? (isTextMode
-                        ? "Try subject + mood + materials + scene composition prompts."
-                        : "Item mode blends both inputs into a larger themed landmark.")
+                        ? "Text-only builder: scene prompts are always active."
                         : summary,
-                8, 66, 0x666666, false);
+                18, 66, 0xA7F3D0, false);
     }
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (isTextMode && promptField.keyPressed(keyCode, scanCode, modifiers)) {
+        if (client != null && client.options.inventoryKey.matchesKey(keyCode, scanCode)) {
+            promptField.setFocused(true);
+            setFocused(promptField);
             return true;
         }
 
-        if (isTextMode && (keyCode == 257 || keyCode == 335)) {
+        if (promptField.keyPressed(keyCode, scanCode, modifiers)) {
+            return true;
+        }
+
+        if (keyCode == 257 || keyCode == 335) {
             submitPrompt();
             return true;
         }
@@ -123,36 +137,22 @@ public class BuilderScreen extends HandledScreen<BuilderScreenHandler> {
 
     @Override
     public boolean charTyped(char chr, int modifiers) {
-        return isTextMode && promptField.charTyped(chr, modifiers) || super.charTyped(chr, modifiers);
+        if (!promptField.isFocused()) {
+            promptField.setFocused(true);
+            setFocused(promptField);
+        }
+        return promptField.charTyped(chr, modifiers) || super.charTyped(chr, modifiers);
     }
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (isTextMode && promptField.mouseClicked(mouseX, mouseY, button)) {
-            setFocused(promptField);
-            return true;
+        boolean handled = promptField.mouseClicked(mouseX, mouseY, button);
+        if (!handled) {
+            handled = super.mouseClicked(mouseX, mouseY, button);
         }
-        return super.mouseClicked(mouseX, mouseY, button);
-    }
-
-    private void toggleMode() {
-        isTextMode = !isTextMode;
-        updateModeButton();
-
-        BlockPos blockPos = handler.getBlockPos();
-        if (blockPos == null) {
-            AlchemodInit.LOG.warn("[BuilderScreen] Missing block position for mode toggle");
-            return;
-        }
-
-        int mode = isTextMode ? BuilderBlockEntity.MODE_TEXT : BuilderBlockEntity.MODE_BLOCK;
-        ClientPlayNetworking.send(new BuilderModePayload(blockPos, mode));
-    }
-
-    private void updateModeButton() {
-        if (modeToggleButton != null) {
-            modeToggleButton.setMessage(Text.literal(isTextMode ? "Mode: TEXT" : "Mode: ITEMS"));
-        }
+        promptField.setFocused(true);
+        setFocused(promptField);
+        return handled;
     }
 
     private void submitPrompt() {
@@ -161,12 +161,7 @@ public class BuilderScreen extends HandledScreen<BuilderScreenHandler> {
             return;
         }
 
-        BlockPos blockPos = handler.getBlockPos();
-        if (blockPos == null) {
-            AlchemodInit.LOG.warn("[BuilderScreen] Missing block position for prompt send");
-            return;
-        }
-
+        BlockPos blockPos = handler.getBlockPos() != null ? handler.getBlockPos() : BlockPos.ORIGIN;
         ClientPlayNetworking.send(new BuilderPromptPayload(blockPos, prompt));
         promptField.setText("");
     }

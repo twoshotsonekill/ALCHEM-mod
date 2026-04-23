@@ -75,7 +75,6 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
     private int progress = 0;
     private boolean aiPending = false;
     private int lastCreatedSlot = -1;
-    private boolean behaviorCodeEnabled = true;
 
     private final PropertyDelegate delegate = new PropertyDelegate() {
         @Override
@@ -84,7 +83,6 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
                 case 0 -> state;
                 case 1 -> progress;
                 case 2 -> lastCreatedSlot;
-                case 3 -> behaviorCodeEnabled ? 1 : 0;
                 default -> 0;
             };
         }
@@ -95,7 +93,6 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
                 case 0 -> state = value;
                 case 1 -> progress = value;
                 case 2 -> lastCreatedSlot = value;
-                case 3 -> behaviorCodeEnabled = value != 0;
                 default -> {
                 }
             }
@@ -103,7 +100,7 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
 
         @Override
         public int size() {
-            return 4;
+            return 3;
         }
     };
 
@@ -127,12 +124,11 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
     }
 
     public void setBehaviorCodeEnabled(boolean enabled) {
-        behaviorCodeEnabled = enabled;
         markDirty();
     }
 
     public boolean isBehaviorCodeEnabled() {
-        return behaviorCodeEnabled;
+        return true;
     }
 
     private void startCreation(World world) {
@@ -147,7 +143,7 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
         String itemB = inputB.getName().getString() + " (" + Registries.ITEM.getId(inputB.getItem()) + ")";
         String inputIdA = Registries.ITEM.getId(inputA.getItem()).toString();
         String inputIdB = Registries.ITEM.getId(inputB.getItem()).toString();
-        boolean allowBehaviorCode = behaviorCodeEnabled;
+        boolean allowBehaviorCode = true;
 
         AlchemodInit.LOG.info("[Creator] Inventing from {} + {} (scripted={})", itemA, itemB, allowBehaviorCode);
 
@@ -201,8 +197,13 @@ Rules:
 - Valid effects only: speed, strength, regeneration, resistance, fire_resistance, night_vision, absorption, luck, haste, jump_boost, slow_falling, water_breathing
 - Valid specials only: ignite, knockback, heal_aura, launch, freeze, drain, phase, lightning, void_step
 - Valid spawn mobs only: zombie, skeleton, creeper, spider, enderman, blaze, witch, phantom, slime, magma_cube, hoglin, strider, cow, pig, sheep, chicken, bat, wolf, rabbit, fox, bee, axolotl, parrot
-- common gets 1 effect, uncommon and rare get 2, epic gets 3, legendary gets 4
-- rare, epic, and legendary should always have a special
+- Avoid defaulting to gems, crystals, glowing shards, or generic relics unless the ingredients clearly imply them.
+- Favor distinct silhouettes and weird object identities: prank tools, cursed snacks, unstable bows, masks, keys, horns, trophies, jars, scraps, fake relics, junk gadgets, novelty trash, bombs, puppets, talismans, and odd little machines.
+- Common items may be goofy, awkward, decorative, mildly useful, or intentionally disappointing. Some results should be funny or strange instead of powerful.
+- Higher-rarity items should feel bold and surprising, including explosive bow-style weapons, chaotic throwables, dramatic spawn eggs, cursed totems, or dangerous one-off artifacts.
+- sprite_prompt must describe a concrete object shape and materials, not a generic magical artifact.
+- common and uncommon items may have 0-2 effects, rare may have 1-2, epic gets 2-3, legendary gets 3-4
+- rare, epic, and legendary should usually have a special
 - if item_type is not spawn_egg, mob_type must be null
 - behavior_script must be null when scripting is disabled
 """;
@@ -236,6 +237,7 @@ Available API:
 - player.getX(), player.getY(), player.getZ(), player.getHealth(), player.getLookDir(), player.isSneaking(), player.isInWater()
 - world.createExplosion(x, y, z, power, fire)
 - world.spawnLightning(x, y, z)
+- world.spawnMob(entityId, x, y, z)
 - world.playSound(soundId, volume, pitch)
 - world.setBlock(x, y, z, blockId)
 - world.isDay(), world.isRaining(), world.getTime()
@@ -247,7 +249,9 @@ Script rules:
 - make the script unique to the ingredients
 - keep it under 20 lines
 - use player.sendMessage for feedback
-- stay thematic with rarity, effects, and special
+- stay thematic with rarity, effects, special, and item_type
+- novelty or mostly useless items should still do something distinctive, even if it is small, awkward, cosmetic, or funny
+- bow items may simulate explosive or dramatic shots on use; throwable items may burst; spawn eggs may summon the chosen mob
 """;
     }
 
@@ -279,24 +283,42 @@ Script rules:
             }
 
             int maxEffects = switch (rarity) {
-                case "uncommon", "rare" -> 2;
+                case "common", "uncommon", "rare" -> 2;
                 case "epic" -> 3;
                 case "legendary" -> 4;
-                default -> 1;
+                default -> 2;
             };
 
-            if (effects.isEmpty()) {
-                effects = List.of("luck");
-            } else if (effects.size() > maxEffects) {
+            int minEffects = switch (rarity) {
+                case "rare" -> 1;
+                case "epic" -> 2;
+                case "legendary" -> 3;
+                default -> 0;
+            };
+
+            if (effects.size() > maxEffects) {
                 effects = effects.subList(0, maxEffects);
             }
 
+            if (effects.size() < minEffects) {
+                List<String> filler = new ArrayList<>(effects);
+                for (String candidate : List.of("luck", "speed", "jump_boost", "night_vision", "strength", "regeneration")) {
+                    if (!filler.contains(candidate)) {
+                        filler.add(candidate);
+                    }
+                    if (filler.size() >= minEffects) {
+                        break;
+                    }
+                }
+                effects = List.copyOf(filler);
+            }
+
             if (special == null && Set.of("rare", "epic", "legendary").contains(rarity)) {
-                special = fallbackSpecial(effects.get(0));
+                special = fallbackSpecial(!effects.isEmpty() ? effects.get(0) : "luck", itemType);
             }
 
             if (allowBehaviorCode && (behaviorScript == null || behaviorScript.isBlank())) {
-                behaviorScript = buildFallbackScript(name, rarity, effects, special);
+                behaviorScript = buildFallbackScript(name, rarity, itemType, effects, special, mobType);
             }
 
             return new CreationResult(
@@ -490,7 +512,6 @@ Script rules:
         nbt.putInt("State", state);
         nbt.putInt("Progress", progress);
         nbt.putInt("LastSlot", lastCreatedSlot);
-        nbt.putBoolean("BehaviorCodeEnabled", behaviorCodeEnabled);
     }
 
     @Override
@@ -500,7 +521,6 @@ Script rules:
         state = nbt.getInt("State");
         progress = nbt.getInt("Progress");
         lastCreatedSlot = nbt.getInt("LastSlot");
-        behaviorCodeEnabled = nbt.getBoolean("BehaviorCodeEnabled");
         if (state == STATE_PROCESSING) {
             state = STATE_IDLE;
             progress = 0;
@@ -598,7 +618,17 @@ Script rules:
         return value == null ? "" : value.toLowerCase().replace("minecraft:", "").trim();
     }
 
-    private static String fallbackSpecial(String effect) {
+    private static String fallbackSpecial(String effect, String itemType) {
+        if ("bow".equals(itemType)) {
+            return "ignite";
+        }
+        if ("throwable".equals(itemType)) {
+            return "lightning";
+        }
+        if ("spawn_egg".equals(itemType)) {
+            return "phase";
+        }
+
         return switch (effect) {
             case "strength" -> "knockback";
             case "speed" -> "void_step";
@@ -612,7 +642,7 @@ Script rules:
         };
     }
 
-    private static String buildFallbackScript(String name, String rarity, List<String> effects, String special) {
+    private static String buildFallbackScript(String name, String rarity, String itemType, List<String> effects, String special, String mobType) {
         int duration = switch (rarity) {
             case "uncommon" -> 240;
             case "rare" -> 320;
@@ -638,6 +668,42 @@ Script rules:
                     .append(");\n");
         }
 
+        switch (itemType) {
+            case "bow" -> builder.append("  var look = player.getLookDir();\n")
+                    .append("  var tx = player.getX() + look[0] * 7;\n")
+                    .append("  var ty = player.getY() + 1.2 + look[1] * 4;\n")
+                    .append("  var tz = player.getZ() + look[2] * 7;\n")
+                    .append("  world.createExplosion(tx, ty, tz, ")
+                    .append(Set.of("epic", "legendary").contains(rarity) ? "3.0" : "2.0")
+                    .append(", false);\n")
+                    .append("  world.playSound('entity.firework_rocket.launch', 0.9, 0.8);\n");
+            case "throwable" -> builder.append("  var look = player.getLookDir();\n")
+                    .append("  var tx = player.getX() + look[0] * 5;\n")
+                    .append("  var ty = player.getY() + 1.0 + look[1] * 3;\n")
+                    .append("  var tz = player.getZ() + look[2] * 5;\n")
+                    .append("  world.createExplosion(tx, ty, tz, 1.6, false);\n")
+                    .append("  world.playSound('entity.snowball.throw', 0.9, 0.9);\n");
+            case "spawn_egg" -> {
+                if (mobType != null && !mobType.isBlank()) {
+                    builder.append("  var look = player.getLookDir();\n")
+                            .append("  world.spawnMob('")
+                            .append(escapeForSingleQuotedScript(mobType))
+                            .append("', player.getX() + look[0] * 2, player.getY(), player.getZ() + look[2] * 2);\n")
+                            .append("  world.playSound('entity.evoker.prepare_summon', 0.8, 1.1);\n");
+                }
+            }
+            case "food" -> builder.append("  player.heal(")
+                    .append(Set.of("epic", "legendary").contains(rarity) ? "6" : "3")
+                    .append(");\n")
+                    .append("  world.playSound('entity.generic.eat', 0.7, 1.4);\n");
+            case "totem" -> builder.append("  player.addEffect('absorption', 240, ")
+                    .append(Set.of("epic", "legendary").contains(rarity) ? "1" : "0")
+                    .append(");\n")
+                    .append("  world.playSound('item.totem.use', 0.7, 1.1);\n");
+            default -> {
+            }
+        }
+
         if (special != null) {
             switch (special) {
                 case "ignite" -> builder.append("  var targets = nearbyEntities(6);\n")
@@ -661,9 +727,16 @@ Script rules:
             }
         }
 
+        if ("common".equals(rarity) && effects.isEmpty() && special == null && !"spawn_egg".equals(itemType)) {
+            builder.append("  world.playSound('entity.item.pickup', 0.6, 1.8);\n")
+                    .append("  player.sendMessage('")
+                    .append(escapeForSingleQuotedScript(name))
+                    .append(" squeaks, rattles, and does very little.');\n");
+        }
+
         builder.append("  player.sendMessage('")
                 .append(escapeForSingleQuotedScript(name))
-                .append(" awakens.');\n");
+                .append(" does something strange.');\n");
         builder.append("  world.playSound('block.beacon.activate', 0.7, 1.2);\n");
         builder.append("}\n");
         return builder.toString();

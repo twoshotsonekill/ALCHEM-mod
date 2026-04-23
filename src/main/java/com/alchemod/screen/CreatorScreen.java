@@ -1,29 +1,25 @@
 package com.alchemod.screen;
 
-import com.alchemod.AlchemodInit;
 import com.alchemod.block.CreatorBlockEntity;
-import com.alchemod.network.CreatorSettingsPayload;
 import com.alchemod.creator.DynamicItem;
 import com.alchemod.resource.RuntimeTextureManager;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
 
 public class CreatorScreen extends HandledScreen<CreatorScreenHandler> {
 
     private static final Identifier BG =
             Identifier.ofVanilla("textures/gui/container/furnace.png");
+    private static final int PANEL_BG = 0xCC1E1B29;
+    private static final int PANEL_SOFT = 0xAA312E3F;
+    private static final int ACCENT = 0xCCFB7185;
 
     private float animTimer = 0f;
-    private ButtonWidget behaviorCodeButton;
-    private boolean behaviorCodeEnabled;
 
     public CreatorScreen(CreatorScreenHandler handler, PlayerInventory inv, Text title) {
         super(handler, inv, title);
@@ -35,12 +31,6 @@ public class CreatorScreen extends HandledScreen<CreatorScreenHandler> {
     protected void init() {
         super.init();
         titleX = (backgroundWidth - textRenderer.getWidth(title)) / 2;
-        behaviorCodeEnabled = handler.isBehaviorCodeEnabled();
-        behaviorCodeButton = ButtonWidget.builder(Text.empty(), button -> toggleBehaviorCode())
-                .dimensions(x + 100, y + 4, 72, 20)
-                .build();
-        updateBehaviorCodeButton();
-        addDrawableChild(behaviorCodeButton);
     }
 
     @Override
@@ -54,6 +44,9 @@ public class CreatorScreen extends HandledScreen<CreatorScreenHandler> {
     protected void drawBackground(DrawContext ctx, float delta, int mx, int my) {
         ctx.drawTexture(RenderLayer::getGuiTextured, BG,
                 x, y, 0, 0, backgroundWidth, backgroundHeight, 256, 256);
+        ctx.fill(x + 8, y + 4, x + backgroundWidth - 8, y + 24, PANEL_BG);
+        ctx.fill(x + 8, y + 57, x + backgroundWidth - 8, y + 78, PANEL_SOFT);
+        ctx.fill(x + 8, y + 57, x + 10, y + 78, ACCENT);
 
         int state    = handler.getState();
         int progress = handler.getProgress();
@@ -89,7 +82,7 @@ public class CreatorScreen extends HandledScreen<CreatorScreenHandler> {
     @Override
     protected void drawForeground(DrawContext ctx, int mouseX, int mouseY) {
         // Title
-        ctx.drawText(textRenderer, title, titleX, titleY, 0x404040, false);
+        ctx.drawText(textRenderer, title, titleX, titleY, 0xFCE7F3, false);
 
         // Status — relative coords
         int state = handler.getState();
@@ -109,9 +102,8 @@ public class CreatorScreen extends HandledScreen<CreatorScreenHandler> {
         int sx = (backgroundWidth - textRenderer.getWidth(status)) / 2;
         ctx.drawText(textRenderer, status, sx, 71, col, false);
         ctx.drawText(textRenderer,
-                behaviorCodeEnabled ? "AI code on: generated items can script actions"
-                        : "AI code off: items use metadata abilities only",
-                8, 59, 0x666666, false);
+                "Wild creator mode: weird junk, cursed tools, and explosive bows are fair game.",
+                12, 59, 0xFBCFE8, false);
 
         // Intentionally NOT calling super to suppress the "Inventory" label at
         // relative y=72, which would overlap with our status line at y=71.
@@ -151,22 +143,4 @@ public class CreatorScreen extends HandledScreen<CreatorScreenHandler> {
                 x + 116, y + 35, 0, 0, 16, 16, 16, 16);
     }
 
-    private void toggleBehaviorCode() {
-        behaviorCodeEnabled = !behaviorCodeEnabled;
-        updateBehaviorCodeButton();
-
-        BlockPos blockPos = handler.getBlockPos();
-        if (blockPos == null) {
-            AlchemodInit.LOG.warn("[CreatorScreen] Missing block position for settings toggle");
-            return;
-        }
-
-        ClientPlayNetworking.send(new CreatorSettingsPayload(blockPos, behaviorCodeEnabled));
-    }
-
-    private void updateBehaviorCodeButton() {
-        if (behaviorCodeButton != null) {
-            behaviorCodeButton.setMessage(Text.literal(behaviorCodeEnabled ? "AI Code: ON" : "AI Code: OFF"));
-        }
-    }
 }

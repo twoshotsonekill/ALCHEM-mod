@@ -45,9 +45,6 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
     public static final int STATE_COMPLETE = 3;
     public static final int STATE_ERROR = 4;
 
-    public static final int MODE_BLOCK = 0;
-    public static final int MODE_TEXT = 1;
-
     private static final int MAX_PROGRESS = 100;
 
     private final DefaultedList<ItemStack> items = DefaultedList.ofSize(2, ItemStack.EMPTY);
@@ -58,7 +55,6 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
     private String lastError = "";
     private String lastBuildPlan = "";
     private boolean aiPending = false;
-    private int builderMode = MODE_TEXT;
 
     private final PropertyDelegate delegate = new PropertyDelegate() {
         @Override
@@ -66,7 +62,6 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
             return switch (index) {
                 case 0 -> state;
                 case 1 -> progress;
-                case 2 -> builderMode;
                 default -> 0;
             };
         }
@@ -76,7 +71,6 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
             switch (index) {
                 case 0 -> state = value;
                 case 1 -> progress = value;
-                case 2 -> builderMode = value;
                 default -> {
                 }
             }
@@ -84,7 +78,7 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
 
         @Override
         public int size() {
-            return 3;
+            return 2;
         }
     };
 
@@ -93,14 +87,6 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
     }
 
     public void serverTick(World world, BlockPos pos) {
-        if (state == STATE_IDLE
-                && builderMode == MODE_BLOCK
-                && !items.get(SLOT_A).isEmpty()
-                && !items.get(SLOT_B).isEmpty()
-                && !aiPending) {
-            startBuild(buildBlockPrompt(), world);
-        }
-
         if (state == STATE_PROCESSING) {
             progress = Math.min(progress + 1, MAX_PROGRESS - 1);
             markDirty();
@@ -129,18 +115,9 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
     }
 
     public void receivePrompt(String prompt, World world) {
-        if (builderMode == MODE_TEXT && prompt != null && !prompt.isBlank()) {
+        if (prompt != null && !prompt.isBlank()) {
             startBuild(prompt, world);
         }
-    }
-
-    public void setBuilderMode(int mode) {
-        builderMode = mode == MODE_BLOCK ? MODE_BLOCK : MODE_TEXT;
-        markDirty();
-    }
-
-    public int getBuilderMode() {
-        return builderMode;
     }
 
     public String getLastBuildPlan() {
@@ -149,14 +126,6 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
 
     public String getLastBuildPlanSummary() {
         return summariseBuildPlan(lastBuildPlan);
-    }
-
-    private String buildBlockPrompt() {
-        return "Create an ambitious Minecraft landmark inspired by "
-                + items.get(SLOT_A).getName().getString()
-                + " and "
-                + items.get(SLOT_B).getName().getString()
-                + ". Make it feel like a full scene with strong silhouette, layered foundations, clear depth, and memorable materials instead of a tiny prop.";
     }
 
     private String requestBuildResponse(String prompt) {
@@ -203,9 +172,6 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
 
             progress = MAX_PROGRESS;
             state = STATE_COMPLETE;
-            if (builderMode == MODE_BLOCK) {
-                consumeInputs();
-            }
             lastError = "";
 
             AlchemodInit.LOG.info("[Builder] Completed build with {} placements (legacy={}, seed={})",
@@ -251,18 +217,6 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
         }
 
         world.setBlockState(target, blockState, Block.NOTIFY_ALL);
-    }
-
-    private void consumeInputs() {
-        for (int slot = 0; slot < 2; slot++) {
-            ItemStack stack = items.get(slot);
-            if (!stack.isEmpty()) {
-                stack.decrement(1);
-                if (stack.isEmpty()) {
-                    items.set(slot, ItemStack.EMPTY);
-                }
-            }
-        }
     }
 
     public static String summariseBuildPlan(String plan) {
@@ -350,7 +304,6 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
         nbt.putString("Prompt", promptText);
         nbt.putString("Error", lastError);
         nbt.putString("BuildPlan", lastBuildPlan);
-        nbt.putInt("Mode", builderMode);
     }
 
     @Override
@@ -362,7 +315,6 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
         promptText = nbt.getString("Prompt");
         lastError = nbt.getString("Error");
         lastBuildPlan = nbt.getString("BuildPlan");
-        builderMode = nbt.getInt("Mode");
         if (state == STATE_PROCESSING || state == STATE_BUILDING) {
             state = STATE_IDLE;
             progress = 0;

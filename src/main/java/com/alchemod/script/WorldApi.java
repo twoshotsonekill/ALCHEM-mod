@@ -43,6 +43,31 @@ public final class WorldApi {
         world.spawnEntity(bolt);
     }
 
+    public void spawnMob(String entityId, double x, double y, double z) {
+        BlockPos pos = BlockPos.ofFloored(x, y, z);
+        if (!pos.isWithinDistance(player.getBlockPos(), 24.0)) {
+            return;
+        }
+
+        try {
+            Identifier id = entityId.contains(":") ? Identifier.of(entityId) : Identifier.of("minecraft", entityId);
+            EntityType<?> type = Registries.ENTITY_TYPE.get(id);
+            if (type == null) {
+                return;
+            }
+
+            Entity entity = type.create(world, SpawnReason.TRIGGERED);
+            if (!(entity instanceof LivingEntity)) {
+                return;
+            }
+
+            entity.refreshPositionAfterTeleport(x, y, z);
+            world.spawnEntity(entity);
+        } catch (Exception e) {
+            AlchemodInit.LOG.debug("[ItemScript] Unknown mob: {}", entityId);
+        }
+    }
+
     public void playSound(String soundId, double volume, double pitch) {
         try {
             Identifier id = soundId.contains(":") ? Identifier.of(soundId) : Identifier.of("minecraft", soundId);

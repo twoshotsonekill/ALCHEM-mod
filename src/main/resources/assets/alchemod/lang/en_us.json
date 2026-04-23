@@ -1,5 +1,5 @@
 {
-  "block.alchemod.alchemical_forge": "Alchemical Forge",
-  "block.alchemod.item_creator": "Item Creator",
-  "block.alchemod.build_creator": "Build Creator"
+  "block.alchemod.alchemical_forge": "Alchem Table",
+  "block.alchemod.item_creator": "Oddity Printer",
+  "block.alchemod.build_creator": "World Sketcher"
 }

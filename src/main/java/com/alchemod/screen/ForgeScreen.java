@@ -1,15 +1,17 @@
 package com.alchemod.screen;
 
 import com.alchemod.block.ForgeBlockEntity;
+import com.alchemod.network.ForgeNbtPayload;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.render.RenderLayer;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.inventory.Inventory;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.math.BlockPos;
 
 public class ForgeScreen extends HandledScreen<ForgeScreenHandler> {
 
@@ -53,8 +55,8 @@ public class ForgeScreen extends HandledScreen<ForgeScreenHandler> {
         loreField.setPlaceholder(Text.literal("Lore line (optional)"));
 
         enchantField = new TextFieldWidget(textRenderer, x + 10, startY + 40, 100, 16, Text.literal("Enchant"));
-        enchantField.setMaxLength(30);
-        enchantField.setPlaceholder(Text.literal("enchant_id"));
+        enchantField.setMaxLength(60);
+        enchantField.setPlaceholder(Text.literal("sharpness 3, fire_aspect 2"));
 
         colorField = new TextFieldWidget(textRenderer, x + 115, startY + 40, 51, 16, Text.literal("Color"));
         colorField.setMaxLength(6);
@@ -133,24 +135,26 @@ public class ForgeScreen extends HandledScreen<ForgeScreenHandler> {
     }
 
     private void applyNbtToBlockEntity() {
-        Inventory inv = handler.getInventory();
-        if (inv instanceof ForgeBlockEntity be) {
-            String name = nameField.getText().trim();
-            String lore = loreField.getText().trim();
-            String ench = enchantField.getText().trim();
-            int color = -1;
-            try {
-                if (!colorField.getText().isBlank()) {
-                    color = Integer.parseInt(colorField.getText().trim(), 16);
-                }
-            } catch (NumberFormatException ignored) {}
-
-            be.setCustomName(name);
-            be.setCustomLore(lore);
-            be.setCustomColor(color);
-            if (!ench.isBlank()) {
-                be.setCustomEnchantments(java.util.List.of(ench));
+        String name = nameField.getText().trim();
+        String lore = loreField.getText().trim();
+        String ench = enchantField.getText().trim();
+        int color = -1;
+        try {
+            if (!colorField.getText().isBlank()) {
+                color = Integer.parseInt(colorField.getText().trim(), 16);
             }
+        } catch (NumberFormatException ignored) {
+            color = -1;
         }
+
+        java.util.List<String> enchantments = ench.isBlank()
+                ? java.util.List.of()
+                : java.util.Arrays.stream(ench.split(","))
+                        .map(String::trim)
+                        .filter(value -> !value.isBlank())
+                        .toList();
+
+        BlockPos blockPos = BlockPos.ORIGIN;
+        ClientPlayNetworking.send(new ForgeNbtPayload(blockPos, name, lore, color, enchantments, 0));
     }
 }

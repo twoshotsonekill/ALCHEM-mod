@@ -27,9 +27,6 @@ public class BuilderScreenHandler extends ScreenHandler {
         this.blockPos = blockPos;
         inventory.onOpen(playerInventory.player);
 
-        addSlot(new Slot(inventory, BuilderBlockEntity.SLOT_A, 30, 53));
-        addSlot(new Slot(inventory, BuilderBlockEntity.SLOT_B, 48, 53));
-
         for (int row = 0; row < 3; row++) {
             for (int column = 0; column < 9; column++) {
                 addSlot(new Slot(playerInventory, column + row * 9 + 9, 8 + column * 18, 84 + row * 18));
@@ -44,34 +41,12 @@ public class BuilderScreenHandler extends ScreenHandler {
     }
 
     public BuilderScreenHandler(int syncId, PlayerInventory playerInventory) {
-        this(syncId, playerInventory, new SimpleInventory(2), new ArrayPropertyDelegate(3), null);
+        this(syncId, playerInventory, new SimpleInventory(2), new ArrayPropertyDelegate(2), null);
     }
 
     @Override
     public ItemStack quickMove(PlayerEntity player, int index) {
-        ItemStack result = ItemStack.EMPTY;
-        Slot slot = slots.get(index);
-        if (!slot.hasStack()) {
-            return result;
-        }
-
-        ItemStack original = slot.getStack();
-        result = original.copy();
-        if (index < inventory.size()) {
-            if (!insertItem(original, inventory.size(), slots.size(), true)) {
-                return ItemStack.EMPTY;
-            }
-        } else if (!insertItem(original, 0, inventory.size(), false)) {
-            return ItemStack.EMPTY;
-        }
-
-        if (original.isEmpty()) {
-            slot.setStack(ItemStack.EMPTY);
-        } else {
-            slot.markDirty();
-        }
-
-        return result;
+        return ItemStack.EMPTY;
     }
 
     @Override
@@ -85,10 +60,6 @@ public class BuilderScreenHandler extends ScreenHandler {
 
     public int getProgress() {
         return propertyDelegate.get(1);
-    }
-
-    public int getMode() {
-        return propertyDelegate.get(2);
     }
 
     public BlockPos getBlockPos() {
