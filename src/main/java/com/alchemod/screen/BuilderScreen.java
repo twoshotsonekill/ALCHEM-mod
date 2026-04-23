@@ -42,8 +42,8 @@ public class BuilderScreen extends HandledScreen<BuilderScreenHandler> {
         addDrawableChild(modeToggleButton);
 
         promptField = new TextFieldWidget(textRenderer, x + 10, y + 30, 156, 18, Text.literal("Builder Prompt"));
-        promptField.setMaxLength(280);
-        promptField.setPlaceholder(Text.literal("Describe a large structure, mood, and materials"));
+        promptField.setMaxLength(512);
+        promptField.setPlaceholder(Text.literal("Describe the subject, mood, materials, scale, and scene"));
         addSelectableChild(promptField);
         setInitialFocus(promptField);
     }
@@ -97,9 +97,13 @@ public class BuilderScreen extends HandledScreen<BuilderScreenHandler> {
         };
         int textX = (backgroundWidth - textRenderer.getWidth(status)) / 2;
         context.drawText(textRenderer, status, textX, 55, color, false);
+        String summary = getBuildPlanSummary();
         context.drawText(textRenderer,
-                isTextMode ? "Try prompts like tower, shrine, ruin, hall, bridge, or fortress."
-                        : "Item mode blends both inputs into a larger themed landmark.",
+                summary.isBlank()
+                        ? (isTextMode
+                        ? "Try subject + mood + materials + scene composition prompts."
+                        : "Item mode blends both inputs into a larger themed landmark.")
+                        : summary,
                 8, 66, 0x666666, false);
     }
 
@@ -165,5 +169,18 @@ public class BuilderScreen extends HandledScreen<BuilderScreenHandler> {
 
         ClientPlayNetworking.send(new BuilderPromptPayload(blockPos, prompt));
         promptField.setText("");
+    }
+
+    private String getBuildPlanSummary() {
+        BlockPos blockPos = handler.getBlockPos();
+        if (blockPos == null || client == null || client.world == null) {
+            return "";
+        }
+
+        if (client.world.getBlockEntity(blockPos) instanceof BuilderBlockEntity builder) {
+            return textRenderer.trimToWidth(builder.getLastBuildPlanSummary(), 160);
+        }
+
+        return "";
     }
 }

@@ -1,6 +1,7 @@
 package com.alchemod.block;
 
 import com.alchemod.AlchemodInit;
+import com.alchemod.ai.OpenRouterClient;
 import com.alchemod.creator.DynamicItem;
 import com.alchemod.creator.DynamicItemRegistry;
 import com.alchemod.screen.CreatorScreenHandler;
@@ -29,11 +30,6 @@ import net.minecraft.util.collection.DefaultedList;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -164,44 +160,25 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
     }
 
     private CreationResult queryOpenRouter(String itemA, String itemB, boolean allowBehaviorCode) {
-        String key = AlchemodInit.OPENROUTER_KEY;
-        if (key.isBlank()) {
-            return CreationResult.error("OPENROUTER_API_KEY not set");
-        }
-
         String system = buildSystemPrompt(allowBehaviorCode);
         String user = "Create a new magical item by combining: " + itemA + " + " + itemB;
-        String body = "{"
-                + "\"model\":\"openai/gpt-4o-mini\","
-                + "\"max_tokens\":" + (allowBehaviorCode ? 850 : 260) + ","
-                + "\"messages\":["
-                + "{\"role\":\"system\",\"content\":" + quoted(system) + "},"
-                + "{\"role\":\"user\",\"content\":" + quoted(user) + "}"
-                + "]}";
+        OpenRouterClient.ChatResult result = OpenRouterClient.chat(
+                AlchemodInit.OPENROUTER_KEY,
+                new OpenRouterClient.ChatRequest(
+                        AlchemodInit.CONFIG.creatorModel(),
+                        allowBehaviorCode
+                                ? AlchemodInit.CONFIG.creatorMaxTokensScripted()
+                                : AlchemodInit.CONFIG.creatorMaxTokensPlain(),
+                        AlchemodInit.CONFIG.creatorTimeoutSeconds(),
+                        system,
+                        user));
 
-        try {
-            HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(10))
-                    .build();
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("https://openrouter.ai/api/v1/chat/completions"))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + key)
-                    .header("HTTP-Referer", "https://github.com/alchemod")
-                    .timeout(Duration.ofSeconds(30))
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .build();
-
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() != 200) {
-                return CreationResult.error("HTTP " + response.statusCode());
-            }
-
-            return parseCreationResult(response.body(), allowBehaviorCode);
-        } catch (Exception e) {
-            AlchemodInit.LOG.error("[Creator] API error", e);
-            return CreationResult.error(e.getMessage());
+        if (result.isError()) {
+            AlchemodInit.LOG.error("[Creator] API error: {}", result.error());
+            return CreationResult.error(result.error());
         }
+
+        return parseCreationResult(result.rawBody() != null ? result.rawBody() : result.content(), allowBehaviorCode);
     }
 
     private String buildSystemPrompt(boolean allowBehaviorCode) {
@@ -276,7 +253,7 @@ Script rules:
 
     private CreationResult parseCreationResult(String apiBody, boolean allowBehaviorCode) {
         try {
-            String content = extractContent(apiBody);
+            String content = OpenRouterClient.extractContent(apiBody);
             String jsonBody = extractFirstJsonObject(stripCodeFence(content != null ? content : apiBody));
             if (jsonBody == null) {
                 return CreationResult.error("Could not parse AI response");
@@ -530,44 +507,6 @@ Script rules:
         }
     }
 
-    private static String extractContent(String apiBody) {
-        try {
-            JsonObject root = JsonParser.parseString(apiBody).getAsJsonObject();
-            JsonArray choices = root.getAsJsonArray("choices");
-            if (choices == null || choices.size() == 0) {
-                return apiBody;
-            }
-
-            JsonObject message = choices.get(0).getAsJsonObject().getAsJsonObject("message");
-            if (message == null) {
-                return apiBody;
-            }
-
-            JsonElement content = message.get("content");
-            if (content == null || content.isJsonNull()) {
-                return apiBody;
-            }
-
-            if (content.isJsonPrimitive()) {
-                return content.getAsString();
-            }
-
-            if (content.isJsonArray()) {
-                StringBuilder builder = new StringBuilder();
-                for (JsonElement element : content.getAsJsonArray()) {
-                    JsonObject part = element.getAsJsonObject();
-                    if (part.has("text")) {
-                        builder.append(part.get("text").getAsString());
-                    }
-                }
-                return builder.toString();
-            }
-        } catch (Exception ignored) {
-        }
-
-        return apiBody;
-    }
-
     private static String stripCodeFence(String value) {
         String trimmed = value == null ? "" : value.trim();
         if (!trimmed.startsWith("```")) {
@@ -732,14 +671,6 @@ Script rules:
 
     private static String escapeForSingleQuotedScript(String value) {
         return value.replace("\\", "\\\\").replace("'", "\\'");
-    }
-
-    private static String quoted(String value) {
-        return "\"" + value
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "") + "\"";
     }
 
     record CreationResult(

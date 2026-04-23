@@ -1,10 +1,12 @@
 package com.alchemod.block;
 
 import com.alchemod.AlchemodInit;
+import com.alchemod.ai.OpenRouterClient;
+import com.alchemod.builder.BuilderProgram;
+import com.alchemod.builder.BuilderPromptFactory;
+import com.alchemod.builder.BuilderResponseParser;
+import com.alchemod.builder.BuilderRuntime;
 import com.alchemod.screen.BuilderScreenHandler;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.entity.BlockEntity;
@@ -14,6 +16,9 @@ import net.minecraft.inventory.Inventories;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.network.listener.ClientPlayPacketListener;
+import net.minecraft.network.packet.Packet;
+import net.minecraft.network.packet.s2c.play.BlockEntityUpdateS2CPacket;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.RegistryWrapper;
 import net.minecraft.screen.NamedScreenHandlerFactory;
@@ -23,18 +28,10 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.collection.DefaultedList;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.MathHelper;
 import net.minecraft.world.World;
 import org.jetbrains.annotations.Nullable;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandlerFactory, Inventory {
@@ -52,12 +49,6 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
     public static final int MODE_TEXT = 1;
 
     private static final int MAX_PROGRESS = 100;
-    private static final int MAX_BLOCK_PLACEMENTS = 4096;
-    private static final int MAX_STRUCTURE_COMMANDS = 160;
-    private static final int MAX_XZ_OFFSET = 24;
-    private static final int MIN_Y_OFFSET = -4;
-    private static final int MAX_Y_OFFSET = 32;
-    private static final int MAX_SPHERE_RADIUS = 10;
 
     private final DefaultedList<ItemStack> items = DefaultedList.ofSize(2, ItemStack.EMPTY);
 
@@ -65,6 +56,7 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
     private int progress = 0;
     private String promptText = "";
     private String lastError = "";
+    private String lastBuildPlan = "";
     private boolean aiPending = false;
     private int builderMode = MODE_TEXT;
 
@@ -125,12 +117,13 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
         state = STATE_PROCESSING;
         progress = 0;
         lastError = "";
+        lastBuildPlan = "";
         markDirty();
 
-        CompletableFuture.supplyAsync(() -> generateStructureCode(promptText))
-                .thenAccept(code -> {
+        CompletableFuture.supplyAsync(() -> requestBuildResponse(promptText))
+                .thenAccept(response -> {
                     if (world.getServer() != null) {
-                        world.getServer().execute(() -> executeStructureCode(code, world));
+                        world.getServer().execute(() -> executeBuildResponse(response, world));
                     }
                 });
     }
@@ -150,88 +143,47 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
         return builderMode;
     }
 
+    public String getLastBuildPlan() {
+        return lastBuildPlan;
+    }
+
+    public String getLastBuildPlanSummary() {
+        return summariseBuildPlan(lastBuildPlan);
+    }
+
     private String buildBlockPrompt() {
-        return "Create a large Minecraft landmark inspired by "
+        return "Create an ambitious Minecraft landmark inspired by "
                 + items.get(SLOT_A).getName().getString()
                 + " and "
                 + items.get(SLOT_B).getName().getString()
-                + ". Make it bold, multi-part, and readable from far away with layered foundations, clear vertical shapes, and real architectural detail instead of a tiny prop.";
+                + ". Make it feel like a full scene with strong silhouette, layered foundations, clear depth, and memorable materials instead of a tiny prop.";
     }
 
-    private String generateStructureCode(String prompt) {
-        String key = AlchemodInit.OPENROUTER_KEY;
-        if (key.isBlank()) {
-            return "ERROR:OPENROUTER_API_KEY not set";
+    private String requestBuildResponse(String prompt) {
+        OpenRouterClient.ChatResult result = OpenRouterClient.chat(
+                AlchemodInit.OPENROUTER_KEY,
+                new OpenRouterClient.ChatRequest(
+                        AlchemodInit.CONFIG.builderModel(),
+                        AlchemodInit.CONFIG.builderMaxTokens(),
+                        AlchemodInit.CONFIG.builderTimeoutSeconds(),
+                        BuilderPromptFactory.buildSystemPrompt(),
+                        BuilderPromptFactory.buildUserPrompt(prompt)));
+
+        if (result.isError()) {
+            AlchemodInit.LOG.error("[Builder] Request failed: {}", result.error());
+            return "ERROR:" + result.error();
         }
 
-        String system = """
-You are a Minecraft builder AI.
-Return ONLY plain text commands, one command per line, with no markdown, no numbering, and no commentary.
-
-Allowed commands:
-- block(x, y, z, "minecraft:block_id")
-- box(x1, y1, z1, x2, y2, z2, "minecraft:block_id")
-- line(x1, y1, z1, x2, y2, z2, "minecraft:block_id")
-- sphere(x, y, z, radius, "minecraft:block_id")
-
-Design goals:
-- Build a substantial landmark, building, ruin, gate, shrine, tower, hall, bridge, or other multi-part structure.
-- Favor strong silhouettes, layered foundations, supports, roofs, arches, framing, and readable detail passes.
-- Prefer structures that feel intentional from far away instead of tiny props or flat blobs.
-
-Rules:
-- Coordinates are relative to the builder block.
-- Keep x and z between -24 and 24.
-- Keep y between -4 and 32.
-- Keep spheres at radius 10 or less.
-- Keep the design under 4096 placed blocks total.
-- Prefer 35 to 140 commands.
-- Leave interior air where appropriate and avoid giant solid cuboids unless explicitly requested.
-- Use only simple vanilla blocks and avoid fluids, portals, command blocks, crops, redstone contraptions, and tile entities.
-- If the prompt is vague, choose a bold fantasy or alchemical interpretation and still make it feel large.
-""";
-
-        String user = "Design a large Minecraft structure for this request: " + prompt;
-        String body = "{"
-                + "\"model\":\"openai/gpt-4o-mini\","
-                + "\"max_tokens\":900,"
-                + "\"messages\":["
-                + "{\"role\":\"system\",\"content\":" + quoted(system) + "},"
-                + "{\"role\":\"user\",\"content\":" + quoted(user) + "}"
-                + "]}";
-
-        try {
-            HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(10))
-                    .build();
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("https://openrouter.ai/api/v1/chat/completions"))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + key)
-                    .header("HTTP-Referer", "https://github.com/alchemod")
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .timeout(Duration.ofSeconds(25))
-                    .build();
-
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() != 200) {
-                return "ERROR:HTTP " + response.statusCode();
-            }
-
-            return extractOpenRouterText(response.body());
-        } catch (Exception e) {
-            AlchemodInit.LOG.error("[Builder] Request failed", e);
-            return "ERROR:" + e.getMessage();
-        }
+        return result.content();
     }
 
-    private void executeStructureCode(String code, World world) {
+    private void executeBuildResponse(String response, World world) {
         aiPending = false;
 
-        if (code == null || code.isBlank() || code.startsWith("ERROR:")) {
+        if (response == null || response.isBlank() || response.startsWith("ERROR:")) {
             state = STATE_ERROR;
             progress = 0;
-            lastError = code == null ? "Unknown builder error" : code;
+            lastError = response == null ? "Unknown builder error" : response;
             markDirty();
             return;
         }
@@ -241,13 +193,13 @@ Rules:
         markDirty();
 
         try {
-            BlockPos origin = getPos().up();
-            PlacementBudget budget = new PlacementBudget(MAX_BLOCK_PLACEMENTS);
-            List<String> commands = sanitiseCommands(code);
+            BuilderProgram program = BuilderResponseParser.parse(response);
+            lastBuildPlan = program.buildPlan();
 
-            for (String command : commands) {
-                executeCommand(command, origin, world, budget);
-            }
+            BlockPos origin = getPos().up();
+            int fallbackSeed = Objects.hash(promptText, getPos().getX(), getPos().getY(), getPos().getZ());
+            BuilderRuntime.ExecutionResult result = BuilderRuntime.execute(program, fallbackSeed,
+                    (x, y, z, blockId) -> placeRelativeBlock(world, origin, x, y, z, blockId));
 
             progress = MAX_PROGRESS;
             state = STATE_COMPLETE;
@@ -255,191 +207,50 @@ Rules:
                 consumeInputs();
             }
             lastError = "";
+
+            AlchemodInit.LOG.info("[Builder] Completed build with {} placements (legacy={}, seed={})",
+                    result.placements(), result.legacyFallback(), result.seedUsed());
+            if (!lastBuildPlan.isBlank()) {
+                AlchemodInit.LOG.info("[Builder] Plan:\n{}", lastBuildPlan);
+            }
         } catch (IllegalArgumentException e) {
             state = STATE_ERROR;
             progress = 0;
             lastError = e.getMessage();
+            if (!lastBuildPlan.isBlank()) {
+                AlchemodInit.LOG.warn("[Builder] Failed build plan:\n{}", lastBuildPlan);
+            }
         } catch (Exception e) {
             state = STATE_ERROR;
             progress = 0;
             lastError = e.getMessage();
+            if (!lastBuildPlan.isBlank()) {
+                AlchemodInit.LOG.warn("[Builder] Failed build plan:\n{}", lastBuildPlan);
+            }
             AlchemodInit.LOG.error("[Builder] Failed to execute structure code", e);
         }
 
         markDirty();
     }
 
-    private List<String> sanitiseCommands(String code) {
-        String cleaned = stripCodeFence(code);
-        String[] lines = cleaned.split("\\R");
-        List<String> commands = new ArrayList<>();
-        for (String rawLine : lines) {
-            String line = rawLine.trim();
-            if (line.isEmpty() || line.startsWith("//")) {
-                continue;
-            }
-            if (line.endsWith(";")) {
-                line = line.substring(0, line.length() - 1);
-            }
-            if (!line.matches("[a-zA-Z_]+\\s*\\(.*\\)")) {
-                continue;
-            }
-            commands.add(line);
-            if (commands.size() > MAX_STRUCTURE_COMMANDS) {
-                throw new IllegalArgumentException("Generated structure used too many commands");
-            }
-        }
-
-        if (commands.isEmpty()) {
-            throw new IllegalArgumentException("Builder AI returned no valid build commands");
-        }
-
-        return commands;
-    }
-
-    private void executeCommand(String command, BlockPos origin, World world, PlacementBudget budget) {
-        int parenIndex = command.indexOf('(');
-        int closeIndex = command.lastIndexOf(')');
-        if (parenIndex <= 0 || closeIndex <= parenIndex) {
-            throw new IllegalArgumentException("Invalid builder command: " + command);
-        }
-
-        String name = command.substring(0, parenIndex).trim().toLowerCase(Locale.ROOT);
-        List<String> args = splitArgs(command.substring(parenIndex + 1, closeIndex));
-
-        switch (name) {
-            case "block" -> executeBlock(args, origin, world, budget);
-            case "box" -> executeBox(args, origin, world, budget);
-            case "line" -> executeLine(args, origin, world, budget);
-            case "sphere" -> executeSphere(args, origin, world, budget);
-            default -> throw new IllegalArgumentException("Unsupported builder command: " + name);
-        }
-
-        progress = Math.min(MAX_PROGRESS - 1, progress + Math.max(1, 70 / Math.max(1, budget.remaining())));
-    }
-
-    private void executeBlock(List<String> args, BlockPos origin, World world, PlacementBudget budget) {
-        if (args.size() != 4) {
-            throw new IllegalArgumentException("block() expects 4 arguments");
-        }
-
-        placeRelativeBlock(world, origin,
-                parseInt(args.get(0)),
-                parseInt(args.get(1)),
-                parseInt(args.get(2)),
-                parseBlockId(args.get(3)),
-                budget);
-    }
-
-    private void executeBox(List<String> args, BlockPos origin, World world, PlacementBudget budget) {
-        if (args.size() != 7) {
-            throw new IllegalArgumentException("box() expects 7 arguments");
-        }
-
-        int x1 = parseInt(args.get(0));
-        int y1 = parseInt(args.get(1));
-        int z1 = parseInt(args.get(2));
-        int x2 = parseInt(args.get(3));
-        int y2 = parseInt(args.get(4));
-        int z2 = parseInt(args.get(5));
-        Identifier blockId = parseBlockId(args.get(6));
-
-        for (int x = Math.min(x1, x2); x <= Math.max(x1, x2); x++) {
-            for (int y = Math.min(y1, y2); y <= Math.max(y1, y2); y++) {
-                for (int z = Math.min(z1, z2); z <= Math.max(z1, z2); z++) {
-                    placeRelativeBlock(world, origin, x, y, z, blockId, budget);
-                }
-            }
-        }
-    }
-
-    private void executeLine(List<String> args, BlockPos origin, World world, PlacementBudget budget) {
-        if (args.size() != 7) {
-            throw new IllegalArgumentException("line() expects 7 arguments");
-        }
-
-        int x1 = parseInt(args.get(0));
-        int y1 = parseInt(args.get(1));
-        int z1 = parseInt(args.get(2));
-        int x2 = parseInt(args.get(3));
-        int y2 = parseInt(args.get(4));
-        int z2 = parseInt(args.get(5));
-        Identifier blockId = parseBlockId(args.get(6));
-        int steps = Math.max(Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1)), Math.abs(z2 - z1));
-        steps = Math.max(steps, 1);
-
-        for (int step = 0; step <= steps; step++) {
-            double t = step / (double) steps;
-            int x = MathHelper.floor(MathHelper.lerp(t, x1, x2));
-            int y = MathHelper.floor(MathHelper.lerp(t, y1, y2));
-            int z = MathHelper.floor(MathHelper.lerp(t, z1, z2));
-            placeRelativeBlock(world, origin, x, y, z, blockId, budget);
-        }
-    }
-
-    private void executeSphere(List<String> args, BlockPos origin, World world, PlacementBudget budget) {
-        if (args.size() != 5) {
-            throw new IllegalArgumentException("sphere() expects 5 arguments");
-        }
-
-        int centerX = parseInt(args.get(0));
-        int centerY = parseInt(args.get(1));
-        int centerZ = parseInt(args.get(2));
-        int radius = Math.min(Math.abs(parseInt(args.get(3))), MAX_SPHERE_RADIUS);
-        Identifier blockId = parseBlockId(args.get(4));
-
-        for (int x = -radius; x <= radius; x++) {
-            for (int y = -radius; y <= radius; y++) {
-                for (int z = -radius; z <= radius; z++) {
-                    double distance = Math.sqrt(x * x + y * y + z * z);
-                    if (distance <= radius && distance >= radius - 1.2) {
-                        placeRelativeBlock(world, origin, centerX + x, centerY + y, centerZ + z, blockId, budget);
-                    }
-                }
-            }
-        }
-    }
-
-    private BlockPos offset(BlockPos origin, String x, String y, String z) {
-        return offset(origin, parseInt(x), parseInt(y), parseInt(z));
-    }
-
-    private BlockPos offset(BlockPos origin, int x, int y, int z) {
-        validateRelativePosition(x, y, z);
-        return origin.add(x, y, z);
-    }
-
-    private int parseInt(String value) {
-        return Integer.parseInt(value.trim());
-    }
-
-    private Identifier parseBlockId(String value) {
-        String cleaned = value.trim().replace("\"", "").replace("'", "");
-        Identifier id = cleaned.contains(":") ? Identifier.of(cleaned) : Identifier.of("minecraft", cleaned);
-        if (!Registries.BLOCK.containsId(id)) {
-            throw new IllegalArgumentException("Unknown block id: " + cleaned);
-        }
-        return id;
-    }
-
-    private void placeBlock(World world, BlockPos pos, Identifier blockId, PlacementBudget budget) {
-        if (!world.isInBuildLimit(pos)) {
+    private void placeRelativeBlock(World world, BlockPos origin, int x, int y, int z, String blockId) {
+        BlockPos target = origin.add(x, y, z);
+        if (!world.isInBuildLimit(target)) {
             return;
         }
 
-        budget.consume();
-        Block block = Registries.BLOCK.get(blockId);
-        world.setBlockState(pos, block.getDefaultState(), Block.NOTIFY_ALL);
-    }
-
-    private void placeRelativeBlock(World world, BlockPos origin, int x, int y, int z, Identifier blockId, PlacementBudget budget) {
-        placeBlock(world, offset(origin, x, y, z), blockId, budget);
-    }
-
-    private void validateRelativePosition(int x, int y, int z) {
-        if (Math.abs(x) > MAX_XZ_OFFSET || Math.abs(z) > MAX_XZ_OFFSET || y < MIN_Y_OFFSET || y > MAX_Y_OFFSET) {
-            throw new IllegalArgumentException("Generated structure exceeded the safe build bounds");
+        Identifier identifier = Identifier.of(blockId);
+        if (!Registries.BLOCK.containsId(identifier)) {
+            throw new IllegalArgumentException("Unknown block id: " + blockId);
         }
+
+        Block block = Registries.BLOCK.get(identifier);
+        BlockState blockState = block.getDefaultState();
+        if (!blockState.getFluidState().isEmpty() || blockState.hasBlockEntity()) {
+            throw new IllegalArgumentException("Builder runtime rejected unsafe block " + blockId);
+        }
+
+        world.setBlockState(target, blockState, Block.NOTIFY_ALL);
     }
 
     private void consumeInputs() {
@@ -454,81 +265,13 @@ Rules:
         }
     }
 
-    private static List<String> splitArgs(String rawArgs) {
-        List<String> args = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        boolean inString = false;
-        char stringDelimiter = 0;
-
-        for (int index = 0; index < rawArgs.length(); index++) {
-            char currentChar = rawArgs.charAt(index);
-            if ((currentChar == '"' || currentChar == '\'') && (index == 0 || rawArgs.charAt(index - 1) != '\\')) {
-                if (!inString) {
-                    inString = true;
-                    stringDelimiter = currentChar;
-                } else if (stringDelimiter == currentChar) {
-                    inString = false;
-                }
-                current.append(currentChar);
-                continue;
-            }
-
-            if (currentChar == ',' && !inString) {
-                args.add(current.toString().trim());
-                current.setLength(0);
-                continue;
-            }
-
-            current.append(currentChar);
+    public static String summariseBuildPlan(String plan) {
+        if (plan == null || plan.isBlank()) {
+            return "";
         }
 
-        if (current.length() > 0) {
-            args.add(current.toString().trim());
-        }
-
-        return args;
-    }
-
-    private static String stripCodeFence(String value) {
-        String trimmed = value == null ? "" : value.trim();
-        if (!trimmed.startsWith("```")) {
-            return trimmed;
-        }
-
-        int firstLine = trimmed.indexOf('\n');
-        int lastFence = trimmed.lastIndexOf("```");
-        if (firstLine < 0 || lastFence <= firstLine) {
-            return trimmed.replace("```", "").trim();
-        }
-
-        return trimmed.substring(firstLine + 1, lastFence).trim();
-    }
-
-    private static String extractOpenRouterText(String body) {
-        try {
-            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
-            JsonArray choices = root.getAsJsonArray("choices");
-            if (choices == null || choices.size() == 0) {
-                return body;
-            }
-
-            JsonObject message = choices.get(0).getAsJsonObject().getAsJsonObject("message");
-            if (message == null || !message.has("content")) {
-                return body;
-            }
-
-            return message.get("content").getAsString();
-        } catch (Exception e) {
-            return body;
-        }
-    }
-
-    private static String quoted(String value) {
-        return "\"" + value
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "") + "\"";
+        String singleLine = plan.replaceAll("\\s+", " ").trim();
+        return singleLine.length() <= 120 ? singleLine : singleLine.substring(0, 117) + "...";
     }
 
     @Override
@@ -606,6 +349,7 @@ Rules:
         nbt.putInt("Progress", progress);
         nbt.putString("Prompt", promptText);
         nbt.putString("Error", lastError);
+        nbt.putString("BuildPlan", lastBuildPlan);
         nbt.putInt("Mode", builderMode);
     }
 
@@ -617,12 +361,24 @@ Rules:
         progress = nbt.getInt("Progress");
         promptText = nbt.getString("Prompt");
         lastError = nbt.getString("Error");
+        lastBuildPlan = nbt.getString("BuildPlan");
         builderMode = nbt.getInt("Mode");
         if (state == STATE_PROCESSING || state == STATE_BUILDING) {
             state = STATE_IDLE;
             progress = 0;
             aiPending = false;
         }
+    }
+
+    @Override
+    public NbtCompound toInitialChunkDataNbt(RegistryWrapper.WrapperLookup registryLookup) {
+        return createNbt(registryLookup);
+    }
+
+    @Nullable
+    @Override
+    public Packet<ClientPlayPacketListener> toUpdatePacket() {
+        return BlockEntityUpdateS2CPacket.create(this);
     }
 
     public int getState() {
@@ -643,24 +399,5 @@ Rules:
 
     public PropertyDelegate getDelegate() {
         return delegate;
-    }
-
-    private static final class PlacementBudget {
-        private int remaining;
-
-        private PlacementBudget(int remaining) {
-            this.remaining = remaining;
-        }
-
-        private void consume() {
-            if (remaining <= 0) {
-                throw new IllegalArgumentException("Generated structure exceeded safe block budget");
-            }
-            remaining--;
-        }
-
-        private int remaining() {
-            return remaining;
-        }
     }
 }
