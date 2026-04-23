@@ -14,20 +14,32 @@ public record AlchemodConfig(
         String openRouterApiKey,
         String builderModel,
         String creatorModel,
+        String forgeModel,
         int builderMaxTokens,
         int creatorMaxTokensScripted,
         int creatorMaxTokensPlain,
         int builderTimeoutSeconds,
-        int creatorTimeoutSeconds
+        int creatorTimeoutSeconds,
+        int forgeTimeoutSeconds
 ) {
 
     public static final String DEFAULT_BUILDER_MODEL = "openai/gpt-5.4-mini";
     public static final String DEFAULT_CREATOR_MODEL = "google/gemini-2.5-flash-lite-preview-05-20";
+    public static final String DEFAULT_FORGE_MODEL = "openai/gpt-4o-mini";
     public static final int DEFAULT_BUILDER_MAX_TOKENS = 3500;
     public static final int DEFAULT_CREATOR_MAX_TOKENS_SCRIPTED = 1200;
     public static final int DEFAULT_CREATOR_MAX_TOKENS_PLAIN = 400;
     public static final int DEFAULT_BUILDER_TIMEOUT_SECONDS = 60;
     public static final int DEFAULT_CREATOR_TIMEOUT_SECONDS = 40;
+    public static final int DEFAULT_FORGE_TIMEOUT_SECONDS = 10;
+
+    public String forgeModel() {
+        return forgeModel;
+    }
+
+    public int forgeTimeoutSeconds() {
+        return forgeTimeoutSeconds;
+    }
 
     public static AlchemodConfig load(Path configPath, Logger logger) {
         if (!Files.exists(configPath)) {
@@ -58,11 +70,13 @@ public record AlchemodConfig(
                 effectiveApiKey,
                 stringProperty(properties, "builder_model", DEFAULT_BUILDER_MODEL),
                 stringProperty(properties, "creator_model", DEFAULT_CREATOR_MODEL),
+                stringProperty(properties, "forge_model", DEFAULT_FORGE_MODEL),
                 intProperty(properties, "builder_max_tokens", DEFAULT_BUILDER_MAX_TOKENS, logger),
                 intProperty(properties, "creator_max_tokens_scripted", DEFAULT_CREATOR_MAX_TOKENS_SCRIPTED, logger),
                 intProperty(properties, "creator_max_tokens_plain", DEFAULT_CREATOR_MAX_TOKENS_PLAIN, logger),
                 intProperty(properties, "builder_timeout_seconds", DEFAULT_BUILDER_TIMEOUT_SECONDS, logger),
-                intProperty(properties, "creator_timeout_seconds", DEFAULT_CREATOR_TIMEOUT_SECONDS, logger));
+                intProperty(properties, "creator_timeout_seconds", DEFAULT_CREATOR_TIMEOUT_SECONDS, logger),
+                intProperty(properties, "forge_timeout_seconds", DEFAULT_FORGE_TIMEOUT_SECONDS, logger));
     }
 
     private static String stringProperty(Properties properties, String key, String fallback) {
@@ -108,19 +122,23 @@ public record AlchemodConfig(
                 openrouter_api_key=YOUR_KEY_HERE
                 builder_model=%s
                 creator_model=%s
+                forge_model=%s
                 builder_max_tokens=%d
                 creator_max_tokens_scripted=%d
                 creator_max_tokens_plain=%d
                 builder_timeout_seconds=%d
                 creator_timeout_seconds=%d
+                forge_timeout_seconds=%d
                 """.formatted(
                 DEFAULT_BUILDER_MODEL,
                 DEFAULT_CREATOR_MODEL,
+                DEFAULT_FORGE_MODEL,
                 DEFAULT_BUILDER_MAX_TOKENS,
                 DEFAULT_CREATOR_MAX_TOKENS_SCRIPTED,
                 DEFAULT_CREATOR_MAX_TOKENS_PLAIN,
                 DEFAULT_BUILDER_TIMEOUT_SECONDS,
-                DEFAULT_CREATOR_TIMEOUT_SECONDS);
+                DEFAULT_CREATOR_TIMEOUT_SECONDS,
+                DEFAULT_FORGE_TIMEOUT_SECONDS);
 
         try (OutputStream out = Files.newOutputStream(path)) {
             out.write(template.getBytes(StandardCharsets.UTF_8));
