@@ -1,4 +1,4 @@
-package com.alchemod.screen;
+package com.alchemod.resource;
 
 import com.alchemod.AlchemodInit;
 import com.google.gson.JsonArray;

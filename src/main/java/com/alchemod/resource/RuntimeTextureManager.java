@@ -1,7 +1,6 @@
 package com.alchemod.resource;
 
 import com.alchemod.AlchemodInit;
-import com.alchemod.screen.SpriteCommandRenderer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.MinecraftClient;
