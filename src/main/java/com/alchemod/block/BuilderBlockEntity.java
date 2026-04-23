@@ -183,16 +183,14 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
             state = STATE_ERROR;
             progress = 0;
             lastError = e.getMessage();
-            if (!lastBuildPlan.isBlank()) {
-                AlchemodInit.LOG.warn("[Builder] Failed build plan:\n{}", lastBuildPlan);
-            }
+            AlchemodInit.LOG.warn("[Builder] Failed build plan:\n{}", lastBuildPlan);
+            AlchemodInit.LOG.warn("[Builder] Failed code:\n{}", response);
         } catch (Exception e) {
             state = STATE_ERROR;
             progress = 0;
             lastError = e.getMessage();
-            if (!lastBuildPlan.isBlank()) {
-                AlchemodInit.LOG.warn("[Builder] Failed build plan:\n{}", lastBuildPlan);
-            }
+            AlchemodInit.LOG.warn("[Builder] Failed build plan:\n{}", lastBuildPlan);
+            AlchemodInit.LOG.warn("[Builder] Failed code:\n{}", response);
             AlchemodInit.LOG.error("[Builder] Failed to execute structure code", e);
         }
 
