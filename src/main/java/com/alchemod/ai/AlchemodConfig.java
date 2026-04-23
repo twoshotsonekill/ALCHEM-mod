@@ -21,7 +21,7 @@ public record AlchemodConfig(
         int creatorTimeoutSeconds
 ) {
 
-    public static final String DEFAULT_BUILDER_MODEL = "openai/gpt-4o-mini";
+    public static final String DEFAULT_BUILDER_MODEL = "openai/gpt-5.4-nano";
     public static final String DEFAULT_CREATOR_MODEL = "google/gemini-2.5-flash-lite-preview-05-20";
     public static final int DEFAULT_BUILDER_MAX_TOKENS = 3500;
     public static final int DEFAULT_CREATOR_MAX_TOKENS_SCRIPTED = 1200;
