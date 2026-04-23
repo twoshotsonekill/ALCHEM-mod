@@ -552,3 +552,102 @@ class BuilderResponseParserRobustnessTest {
         assertNotNull(program);
     }
 }
+    @Test
+    void handlesExpandedPaletteWoodBlocks() {
+        String response = """
+                {"tool":"voxel.exec","input":{"palette":"simple_v1","seed":44,"bounds":{"x":[-64,64],"y":[-8,72],"z":[-64,64]},"build_plan":"Wood structure.","code":"box(0,0,0,5,10,5,'oak_planks'); box(10,0,0,15,10,5,'spruce_planks'); box(20,0,0,25,10,5,'birch_planks');"}}
+                """;
+        BuilderProgram program = BuilderResponseParser.parse(response);
+        assertNotNull(program);
+        assertTrue(program.code().contains("oak_planks"));
+        assertTrue(program.code().contains("spruce_planks"));
+        assertTrue(program.code().contains("birch_planks"));
+    }
+
+    @Test
+    void handlesExpandedPaletteStoneVariants() {
+        String response = """
+                {"tool":"voxel.exec","input":{"palette":"simple_v1","seed":45,"bounds":{"x":[-64,64],"y":[-8,72],"z":[-64,64]},"build_plan":"Stone variants.","code":"box(0,0,0,5,10,5,'deepslate'); box(10,0,0,15,10,5,'deepslate_bricks'); box(20,0,0,25,10,5,'deepslate_tiles');"}}
+                """;
+        BuilderProgram program = BuilderResponseParser.parse(response);
+        assertNotNull(program);
+        assertTrue(program.code().contains("deepslate"));
+    }
+
+    @Test
+    void handlesExpandedPaletteConcreteBlocks() {
+        String response = """
+                {"tool":"voxel.exec","input":{"palette":"simple_v1","seed":46,"bounds":{"x":[-64,64],"y":[-8,72],"z":[-64,64]},"build_plan":"Concrete structure.","code":"box(0,0,0,10,5,10,'white_concrete'); sphere(15,5,15,3,'red_concrete');"}}
+                """;
+        BuilderProgram program = BuilderResponseParser.parse(response);
+        assertNotNull(program);
+        assertTrue(program.code().contains("white_concrete"));
+        assertTrue(program.code().contains("red_concrete"));
+    }
+
+    @Test
+    void handlesExpandedPaletteNetherBlocks() {
+        String response = """
+                {"tool":"voxel.exec","input":{"palette":"simple_v1","seed":47,"bounds":{"x":[-64,64],"y":[-8,72],"z":[-64,64]},"build_plan":"Nether fortress.","code":"box(0,0,0,20,15,20,'netherrack'); box(2,2,2,18,13,18,'nether_bricks');"}}
+                """;
+        BuilderProgram program = BuilderResponseParser.parse(response);
+        assertNotNull(program);
+        assertTrue(program.code().contains("netherrack"));
+        assertTrue(program.code().contains("nether_bricks"));
+    }
+
+    @Test
+    void handlesExpandedPaletteEndBlocks() {
+        String response = """
+                {"tool":"voxel.exec","input":{"palette":"simple_v1","seed":48,"bounds":{"x":[-64,64],"y":[-8,72],"z":[-64,64]},"build_plan":"End structure.","code":"box(0,0,0,10,10,10,'end_stone'); sphere(5,15,5,4,'purpur_block');"}}
+                """;
+        BuilderProgram program = BuilderResponseParser.parse(response);
+        assertNotNull(program);
+        assertTrue(program.code().contains("end_stone"));
+        assertTrue(program.code().contains("purpur_block"));
+    }
+
+    @Test
+    void handlesExpandedPaletteOreBlocks() {
+        String response = """
+                {"tool":"voxel.exec","input":{"palette":"simple_v1","seed":49,"bounds":{"x":[-64,64],"y":[-8,72],"z":[-64,64]},"build_plan":"Ore display.","code":"block(0,0,0,'coal_ore'); block(1,0,0,'iron_ore'); block(2,0,0,'gold_ore'); block(3,0,0,'diamond_ore');"}}
+                """;
+        BuilderProgram program = BuilderResponseParser.parse(response);
+        assertNotNull(program);
+        assertTrue(program.code().contains("coal_ore"));
+        assertTrue(program.code().contains("diamond_ore"));
+    }
+
+    @Test
+    void handlesExpandedPaletteMetalBlocks() {
+        String response = """
+                {"tool":"voxel.exec","input":{"palette":"simple_v1","seed":50,"bounds":{"x":[-64,64],"y":[-8,72],"z":[-64,64]},"build_plan":"Metal blocks.","code":"box(0,0,0,5,5,5,'iron_block'); box(10,0,0,15,5,5,'gold_block'); box(20,0,0,25,5,5,'diamond_block');"}}
+                """;
+        BuilderProgram program = BuilderResponseParser.parse(response);
+        assertNotNull(program);
+        assertTrue(program.code().contains("iron_block"));
+        assertTrue(program.code().contains("diamond_block"));
+    }
+
+    @Test
+    void handlesExpandedPaletteDecorativeBlocks() {
+        String response = """
+                {"tool":"voxel.exec","input":{"palette":"simple_v1","seed":51,"bounds":{"x":[-64,64],"y":[-8,72],"z":[-64,64]},"build_plan":"Decorative structure.","code":"box(0,0,0,10,10,10,'oak_stairs'); line(0,10,0,10,10,10,'oak_fence');"}}
+                """;
+        BuilderProgram program = BuilderResponseParser.parse(response);
+        assertNotNull(program);
+        assertTrue(program.code().contains("oak_stairs"));
+        assertTrue(program.code().contains("oak_fence"));
+    }
+
+    @Test
+    void handlesExpandedPaletteLightSources() {
+        String response = """
+                {"tool":"voxel.exec","input":{"palette":"simple_v1","seed":52,"bounds":{"x":[-64,64],"y":[-8,72],"z":[-64,64]},"build_plan":"Illuminated structure.","code":"box(0,0,0,10,10,10,'stone'); sphere(5,15,5,3,'glowstone'); block(0,20,0,'sea_lantern');"}}
+                """;
+        BuilderProgram program = BuilderResponseParser.parse(response);
+        assertNotNull(program);
+        assertTrue(program.code().contains("glowstone"));
+        assertTrue(program.code().contains("sea_lantern"));
+    }
+}
