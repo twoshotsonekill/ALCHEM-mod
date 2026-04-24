@@ -1,6 +1,7 @@
 package com.alchemod.block;
 
 import com.alchemod.AlchemodInit;
+import com.alchemod.ai.OpenRouterClient;
 import com.alchemod.screen.ForgeScreenHandler;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
@@ -36,11 +37,6 @@ import net.minecraft.util.collection.DefaultedList;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -129,7 +125,7 @@ public class ForgeBlockEntity extends BlockEntity
                 });
     }
 
-    // ── OpenRouter HTTP call ──────────────────────────────────────────────────
+    // ── OpenRouter API call via centralized client ────────────────────────────
     private String queryOpenRouter(String itemA, String itemB) {
         String key = AlchemodInit.OPENROUTER_KEY;
         if (key.isBlank()) {
@@ -146,52 +142,31 @@ public class ForgeBlockEntity extends BlockEntity
 
         String user = "Combine: " + itemA + " + " + itemB;
 
-        // Build JSON manually — no external dependency needed
-        String body = "{"
-                + "\"model\":\"openai/gpt-4o-mini\","
-                + "\"max_tokens\":30,"
-                + "\"messages\":["
-                + "{\"role\":\"system\",\"content\":" + quoted(system) + "},"
-                + "{\"role\":\"user\",\"content\":" + quoted(user) + "}"
-                + "]}";
+        // Use centralized OpenRouterClient instead of inline HTTP
+        OpenRouterClient.ChatResult result = OpenRouterClient.chat(
+                key,
+                new OpenRouterClient.ChatRequest(
+                        AlchemodInit.CONFIG.forgeModel(),
+                        30,  // max_tokens
+                        AlchemodInit.CONFIG.forgeTimeoutSeconds(),
+                        system,
+                        user));
 
-        try {
-            HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(10))
-                    .build();
-
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create("https://openrouter.ai/api/v1/chat/completions"))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + key)
-                    .header("HTTP-Referer", "https://github.com/alchemod")
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .timeout(Duration.ofSeconds(20))
-                    .build();
-
-            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
-            AlchemodInit.LOG.info("[Alchemod] API status={} body={}", resp.statusCode(), resp.body());
-
-            if (resp.statusCode() != 200) return "ERROR:http_" + resp.statusCode();
-
-            return parseItemId(resp.body());
-
-        } catch (Exception e) {
-            AlchemodInit.LOG.error("[Alchemod] HTTP error", e);
-            return "ERROR:" + e.getClass().getSimpleName();
+        if (result.isError()) {
+            AlchemodInit.LOG.error("[Alchemod] API error: {}", result.error());
+            return "ERROR:" + result.error();
         }
+
+        return parseItemId(result.content());
     }
 
-    // Extract item ID from OpenRouter response (e.g. {"choices":[{"message":{"content":"minecraft:blaze_rod"}}]})
-    private String parseItemId(String json) {
-        // Grab the content field value
-        Pattern p = Pattern.compile("\"content\"\\s*:\\s*\"([^\"]+)\"");
-        Matcher m = p.matcher(json);
+    // Extract item ID from response content (e.g. "minecraft:blaze_rod")
+    private String parseItemId(String content) {
+        // Extract first namespace:id token from the response
+        Pattern idMatch = Pattern.compile("([a-z][a-z0-9_]*:[a-z][a-z0-9_/]*)");
+        Matcher m = idMatch.matcher(content);
         if (m.find()) {
-            String raw = m.group(1).trim();
-            // Extract first namespace:id token
-            Matcher idMatch = Pattern.compile("([a-z][a-z0-9_]*:[a-z][a-z0-9_/]*)").matcher(raw);
-            if (idMatch.find()) return idMatch.group(1);
+            return m.group(1);
         }
         return "minecraft:nether_star"; // safe fallback
     }
