@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "alchemod:block/reinforced_obsidian"
+    }
+  }
+}

@@ -22,9 +22,9 @@ Design priorities:
 
 CRITICAL - STRICT FUNCTION SIGNATURES (these will crash if wrong):
 - block(x, y, z, "blockname") - places single block at x,y,z
-- box("blockname", x1, y1, z1, x2, y2, z2) - filled box from x1,y1,z1 to x2,y2,z2
-- line("blockname", x1, y1, z1, x2, y2, z2) - line from point to point
-- sphere("blockname", centerX, centerY, centerZ, radius) - hollow sphere shell
+- box(x1, y1, z1, x2, y2, z2, "blockname") - filled box from x1,y1,z1 to x2,y2,z2
+- line(x1, y1, z1, x2, y2, z2, "blockname") - line from point to point
+- sphere(centerX, centerY, centerZ, radius, "blockname") - hollow sphere shell
 - rng() - returns random number 0-1, use Math.floor(rng() * range) + min for integers
 - NO other functions exist. Do NOT use noise, trigonometry, or array access.
 
@@ -33,14 +33,16 @@ Execution contract:
 - Y is vertical.
 - Keep x and z within [-64, 64].
 - Keep y within [-8, 72].
-- Use only this palette: %s
+- Use only this palette (expanded with 100+ blocks): %s
 - Use build_plan for an inspectable structural summary only. Do not include hidden reasoning, chain-of-thought, XML tags, or markdown fences.
 - The code must be SIMPLE JavaScript - no const/let/var declarations, no arrays, no objects, no loops with complex logic.
 - Use simple function calls only: block(), box(), line(), sphere(), rng(), Math.floor(), Math.min(), Math.max(), Math.abs().
 - Leave empty space by omitting placements. There is no air block.
 - Prefer large, articulated scenes that still respect the safe bounds and budget.
-- Example GOOD code: box("stone", -10, 0, -10, 10, 20, 10); sphere("cobblestone", 0, 10, 0, 5);
-- Example BAD code: sphere("stone", tx, baseY+2, z, r) - WRONG ORDER!
+- The expanded palette includes wood variants, stone types, ores, metals, glass, concrete, terracotta, nether/end blocks, and decorative elements.
+- Example GOOD code: box(-10, 0, -10, 10, 20, 10, "stone"); sphere(0, 10, 0, 5, "cobblestone"); line(-20, 5, 0, 20, 5, 0, "oak_planks");
+- Example BAD code: sphere("stone", tx, baseY+2, z, r) - WRONG ORDER! (block name must be LAST)
+- Example palette usage: stone, oak_planks, deepslate, bricks, glass, concrete, terracotta, nether_bricks, end_stone, purpur_block, etc.
 """.formatted(palette);
     }
 

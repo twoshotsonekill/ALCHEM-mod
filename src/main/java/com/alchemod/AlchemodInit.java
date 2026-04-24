@@ -1,12 +1,15 @@
 package com.alchemod;
 
 import com.alchemod.ai.AlchemodConfig;
+import com.alchemod.block.AlchemicalGlassBlock;
 import com.alchemod.block.BuilderBlock;
 import com.alchemod.block.BuilderBlockEntity;
 import com.alchemod.block.CreatorBlock;
 import com.alchemod.block.CreatorBlockEntity;
 import com.alchemod.block.ForgeBlock;
 import com.alchemod.block.ForgeBlockEntity;
+import com.alchemod.block.GlowStoneBricksBlock;
+import com.alchemod.block.ReinforcedObsidianBlock;
 import com.alchemod.creator.DynamicItemRegistry;
 import com.alchemod.event.ItemAbilityEvents;
 import com.alchemod.network.BuilderPromptPayload;
@@ -50,6 +53,14 @@ public class AlchemodInit implements ModInitializer {
     public static Item CREATOR_ITEM;
     public static Block BUILDER_BLOCK;
     public static Item BUILDER_ITEM;
+
+    // New specialized blocks
+    public static Block ALCHEMICAL_GLASS_BLOCK;
+    public static Item ALCHEMICAL_GLASS_ITEM;
+    public static Block REINFORCED_OBSIDIAN_BLOCK;
+    public static Item REINFORCED_OBSIDIAN_ITEM;
+    public static Block GLOWSTONE_BRICKS_BLOCK;
+    public static Item GLOWSTONE_BRICKS_ITEM;
 
     public static BlockEntityType<ForgeBlockEntity> FORGE_BE_TYPE;
     public static BlockEntityType<CreatorBlockEntity> CREATOR_BE_TYPE;
@@ -99,6 +110,46 @@ public class AlchemodInit implements ModInitializer {
                 Registries.ITEM, Identifier.of(MOD_ID, "build_creator"),
                 new BlockItem(BUILDER_BLOCK, new Item.Settings()
                         .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "build_creator")))));
+
+        // Register Alchemical Glass Block
+        ALCHEMICAL_GLASS_BLOCK = Registry.register(
+                Registries.BLOCK, Identifier.of(MOD_ID, "alchemical_glass"),
+                new AlchemicalGlassBlock(AbstractBlock.Settings.create()
+                        .registryKey(RegistryKey.of(RegistryKeys.BLOCK, Identifier.of(MOD_ID, "alchemical_glass")))
+                        .mapColor(MapColor.CYAN).strength(0.3f, 0.3f)
+                        .sounds(BlockSoundGroup.GLASS).luminance(s -> 2)
+                        .nonOpaque().allowsSpawning((state, world, pos, entity) -> false)));
+
+        ALCHEMICAL_GLASS_ITEM = Registry.register(
+                Registries.ITEM, Identifier.of(MOD_ID, "alchemical_glass"),
+                new BlockItem(ALCHEMICAL_GLASS_BLOCK, new Item.Settings()
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "alchemical_glass")))));
+
+        // Register Reinforced Obsidian Block
+        REINFORCED_OBSIDIAN_BLOCK = Registry.register(
+                Registries.BLOCK, Identifier.of(MOD_ID, "reinforced_obsidian"),
+                new ReinforcedObsidianBlock(AbstractBlock.Settings.create()
+                        .registryKey(RegistryKey.of(RegistryKeys.BLOCK, Identifier.of(MOD_ID, "reinforced_obsidian")))
+                        .mapColor(MapColor.BLACK).strength(50f, 1200f).requiresTool()
+                        .sounds(BlockSoundGroup.STONE)));
+
+        REINFORCED_OBSIDIAN_ITEM = Registry.register(
+                Registries.ITEM, Identifier.of(MOD_ID, "reinforced_obsidian"),
+                new BlockItem(REINFORCED_OBSIDIAN_BLOCK, new Item.Settings()
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "reinforced_obsidian")))));
+
+        // Register Glowstone Bricks Block
+        GLOWSTONE_BRICKS_BLOCK = Registry.register(
+                Registries.BLOCK, Identifier.of(MOD_ID, "glowstone_bricks"),
+                new GlowStoneBricksBlock(AbstractBlock.Settings.create()
+                        .registryKey(RegistryKey.of(RegistryKeys.BLOCK, Identifier.of(MOD_ID, "glowstone_bricks")))
+                        .mapColor(MapColor.YELLOW).strength(0.8f, 0.8f)
+                        .sounds(BlockSoundGroup.STONE).luminance(s -> 15)));
+
+        GLOWSTONE_BRICKS_ITEM = Registry.register(
+                Registries.ITEM, Identifier.of(MOD_ID, "glowstone_bricks"),
+                new BlockItem(GLOWSTONE_BRICKS_BLOCK, new Item.Settings()
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "glowstone_bricks")))));
 
         DynamicItemRegistry.register();
         ItemAbilityEvents.register();
@@ -185,6 +236,15 @@ public class AlchemodInit implements ModInitializer {
             entries.add(FORGE_ITEM);
             entries.add(CREATOR_ITEM);
             entries.add(BUILDER_ITEM);
+            entries.add(ALCHEMICAL_GLASS_ITEM);
+            entries.add(REINFORCED_OBSIDIAN_ITEM);
+            entries.add(GLOWSTONE_BRICKS_ITEM);
+        });
+
+        ItemGroupEvents.modifyEntriesEvent(ItemGroups.BUILDING_BLOCKS).register(entries -> {
+            entries.add(ALCHEMICAL_GLASS_ITEM);
+            entries.add(REINFORCED_OBSIDIAN_ITEM);
+            entries.add(GLOWSTONE_BRICKS_ITEM);
         });
     }
 }
