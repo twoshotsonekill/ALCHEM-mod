@@ -22,25 +22,36 @@ import net.minecraft.world.World;
 
 import java.util.List;
 
+/**
+ * A dynamic item whose identity — name, effects, script, rarity, etc. — is stored
+ * entirely in NBT components on the {@link ItemStack}.  No in-memory registry lookup
+ * is performed for any gameplay behaviour, so items survive server restarts correctly.
+ *
+ * <p>The {@code slotIndex} field is only used as a texture-cache key in the current
+ * session; it carries no semantic identity.
+ */
 public class DynamicItem extends Item {
 
     private static final int EFFECT_DURATION = 600;
 
     private final int slotIndex;
-    private DynamicItemRegistry.CreatedItemMeta meta;
 
     public DynamicItem(Settings settings, int slotIndex) {
         super(settings);
         this.slotIndex = slotIndex;
     }
 
+    /** Called by {@link DynamicItemRegistry} when item metadata is freshly generated
+     *  in the same session.  Kept for backwards-compat; gameplay no longer uses it. */
     public void setMeta(DynamicItemRegistry.CreatedItemMeta meta) {
-        this.meta = meta;
+        // No-op — all behaviour is now read from ItemStack NBT.
     }
 
     public int getSlotIndex() {
         return slotIndex;
     }
+
+    // ── Right-click use ───────────────────────────────────────────────────────
 
     @Override
     public ActionResult use(World world, PlayerEntity user, Hand hand) {
@@ -49,7 +60,6 @@ public class DynamicItem extends Item {
             return ActionResult.SUCCESS;
         }
 
-        DynamicItemRegistry.CreatedItemMeta runtimeMeta = resolveMeta(stack);
         int charges = getCharges(stack);
         if (charges <= 0) {
             user.sendMessage(Text.literal("This item has no charges remaining."), true);
@@ -57,21 +67,24 @@ public class DynamicItem extends Item {
         }
 
         boolean didUse = false;
-        String script = readTag(stack, "creator_script");
-        if ((script == null || script.isBlank()) && runtimeMeta != null) {
-            script = runtimeMeta.script();
-        }
 
+        // Priority 1: run embedded behavior script.
+        String script = readTag(stack, "creator_script");
         if (script != null && !script.isBlank()) {
             didUse = ItemScriptEngine.execute(script, user, (ServerWorld) world, stack);
         }
 
-        if (!didUse && runtimeMeta != null && runtimeMeta.effects() != null && !runtimeMeta.effects().isEmpty()) {
-            String effectName = runtimeMeta.effects().get(0);
-            RegistryEntry<net.minecraft.entity.effect.StatusEffect> effect = EffectResolver.resolve(effectName);
-            if (effect != null) {
-                user.addStatusEffect(new StatusEffectInstance(effect, EFFECT_DURATION, 1));
-                didUse = true;
+        // Priority 2: fall back to first listed effect.
+        if (!didUse) {
+            String effectsCsv = readTag(stack, "creator_effects");
+            if (effectsCsv != null && !effectsCsv.isBlank()) {
+                String firstEffect = effectsCsv.split(",")[0].trim();
+                RegistryEntry<net.minecraft.entity.effect.StatusEffect> effect =
+                        EffectResolver.resolve(firstEffect);
+                if (effect != null) {
+                    user.addStatusEffect(new StatusEffectInstance(effect, EFFECT_DURATION, 1));
+                    didUse = true;
+                }
             }
         }
 
@@ -79,15 +92,22 @@ public class DynamicItem extends Item {
             return ActionResult.PASS;
         }
 
-        consumeCharge(stack, charges - 1);
+        int remaining = charges - 1;
+        consumeCharge(stack, remaining);
         world.playSound(null, user.getX(), user.getY(), user.getZ(),
                 SoundEvents.BLOCK_BEACON_ACTIVATE, SoundCategory.PLAYERS, 0.6f, 1.2f);
-        user.sendMessage(Text.literal(charges - 1 <= 0 ? "Last charge used." : "Charges remaining: " + (charges - 1)), true);
+        user.sendMessage(Text.literal(remaining <= 0
+                ? "Last charge used."
+                : "Charges remaining: " + remaining), true);
         return ActionResult.SUCCESS;
     }
 
+    // ── Tooltip ───────────────────────────────────────────────────────────────
+
     @Override
-    public void appendTooltip(ItemStack stack, TooltipContext context, List<Text> tooltip, TooltipType type) {
+    public void appendTooltip(ItemStack stack, TooltipContext context,
+            List<Text> tooltip, TooltipType type) {
+
         String description = readTag(stack, "creator_desc");
         if (description != null && !description.isBlank()) {
             tooltip.add(Text.literal(description));
@@ -95,7 +115,7 @@ public class DynamicItem extends Item {
 
         String rarity = readTag(stack, "creator_rarity");
         if (rarity != null && !rarity.isBlank()) {
-            tooltip.add(Text.literal(resolveMeta(stack) != null ? resolveMeta(stack).rarityLabel() : rarity));
+            tooltip.add(Text.literal(DynamicItemRegistry.CreatedItemMeta.staticRarityLabel(rarity)));
         }
 
         String itemType = readTag(stack, "creator_item_type");
@@ -107,7 +127,8 @@ public class DynamicItem extends Item {
         if (effectsCsv != null && !effectsCsv.isBlank()) {
             for (String effect : effectsCsv.split(",")) {
                 if (!effect.isBlank()) {
-                    tooltip.add(Text.literal("  " + DynamicItemRegistry.CreatedItemMeta.effectLabel(effect.trim())));
+                    tooltip.add(Text.literal(
+                            "  " + DynamicItemRegistry.CreatedItemMeta.effectLabel(effect.trim())));
                 }
             }
         }
@@ -128,45 +149,26 @@ public class DynamicItem extends Item {
         tooltip.add(Text.literal("Charges: " + getCharges(stack)));
     }
 
-    private DynamicItemRegistry.CreatedItemMeta resolveMeta(ItemStack stack) {
-        if (meta != null) {
-            return meta;
-        }
+    // ── NBT helpers ───────────────────────────────────────────────────────────
 
-        NbtCompound tag = getCustomData(stack);
-        if (tag != null) {
-            int storedSlot = tag.getInt("creator_slot");
-            if (storedSlot >= 0) {
-                DynamicItemRegistry.CreatedItemMeta storedMeta = DynamicItemRegistry.getMeta(storedSlot);
-                if (storedMeta != null) {
-                    return storedMeta;
-                }
-            }
-        }
-
-        return DynamicItemRegistry.getMeta(slotIndex);
-    }
-
-    private static int getCharges(ItemStack stack) {
+    public static int getCharges(ItemStack stack) {
         NbtCompound tag = getCustomData(stack);
         return tag != null ? tag.getInt("charges") : 0;
     }
 
-    private static void consumeCharge(ItemStack stack, int charges) {
+    public static void consumeCharge(ItemStack stack, int remaining) {
         NbtCompound tag = getCustomData(stack);
-        if (tag == null) {
-            tag = new NbtCompound();
-        }
-        tag.putInt("charges", Math.max(charges, 0));
+        if (tag == null) tag = new NbtCompound();
+        tag.putInt("charges", Math.max(remaining, 0));
         stack.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(tag));
     }
 
-    private static String readTag(ItemStack stack, String key) {
+    public static String readTag(ItemStack stack, String key) {
         NbtCompound tag = getCustomData(stack);
         return tag != null ? tag.getString(key) : null;
     }
 
-    private static NbtCompound getCustomData(ItemStack stack) {
+    public static NbtCompound getCustomData(ItemStack stack) {
         NbtComponent customData = stack.get(DataComponentTypes.CUSTOM_DATA);
         return customData != null ? customData.copyNbt() : null;
     }
