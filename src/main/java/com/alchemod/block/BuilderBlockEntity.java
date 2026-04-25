@@ -147,17 +147,34 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
 
     private long completedTime = 0;
 
-    @Override
-    public void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registries) {
-        super.readNbt(nbt, registries);
-        lastPromptTime = nbt.getLong("lastPromptTime");
+@Override
+    protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
+        super.writeNbt(nbt, registryLookup);
+        Inventories.writeNbt(nbt, items, registryLookup);
+        nbt.putInt("State", state);
+        nbt.putInt("Progress", progress);
+        nbt.putString("Prompt", promptText);
+        nbt.putString("Error", lastError);
+        nbt.putString("BuildPlan", lastBuildPlan);
+        nbt.putLong("lastPromptTime", lastPromptTime);
     }
 
     @Override
-    protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registries) {
-        super.writeNbt(nbt, registries);
-        nbt.putLong("lastPromptTime", lastPromptTime);
-    }
+    protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
+        super.readNbt(nbt, registryLookup);
+        Inventories.readNbt(nbt, items, registryLookup);
+        state = nbt.getInt("State");
+        progress = nbt.getInt("Progress");
+        promptText = nbt.getString("Prompt");
+        lastError = nbt.getString("Error");
+        lastBuildPlan = nbt.getString("BuildPlan");
+        lastPromptTime = nbt.getLong("lastPromptTime");
+        if (state == STATE_PROCESSING || state == STATE_BUILDING) {
+            state = STATE_IDLE;
+            progress = 0;
+            aiPending = false;
+        }
+}
 
     public void startBuild(String prompt, World world) {
         if (aiPending || prompt == null || prompt.isBlank()) {
@@ -388,33 +405,6 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
     @Override
     public ScreenHandler createMenu(int syncId, PlayerInventory playerInventory, PlayerEntity player) {
         return new BuilderScreenHandler(syncId, playerInventory, this, delegate, getPos());
-    }
-
-    @Override
-    protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-        super.writeNbt(nbt, registryLookup);
-        Inventories.writeNbt(nbt, items, registryLookup);
-        nbt.putInt("State", state);
-        nbt.putInt("Progress", progress);
-        nbt.putString("Prompt", promptText);
-        nbt.putString("Error", lastError);
-        nbt.putString("BuildPlan", lastBuildPlan);
-    }
-
-    @Override
-    protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-        super.readNbt(nbt, registryLookup);
-        Inventories.readNbt(nbt, items, registryLookup);
-        state = nbt.getInt("State");
-        progress = nbt.getInt("Progress");
-        promptText = nbt.getString("Prompt");
-        lastError = nbt.getString("Error");
-        lastBuildPlan = nbt.getString("BuildPlan");
-        if (state == STATE_PROCESSING || state == STATE_BUILDING) {
-            state = STATE_IDLE;
-            progress = 0;
-            aiPending = false;
-        }
     }
 
     @Override

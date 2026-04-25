@@ -551,7 +551,7 @@ class BuilderResponseParserRobustnessTest {
         BuilderProgram program = BuilderResponseParser.parse(response);
         assertNotNull(program);
     }
-}
+
     @Test
     void handlesExpandedPaletteWoodBlocks() {
         String response = """
