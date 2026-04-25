@@ -66,9 +66,26 @@ public final class BuilderRuntime {
             // Misc
             "sandstone", "red_sandstone", "prismarine", "dark_prismarine", "sea_pickle");
 
-    private static final Set<String> SIMPLE_PALETTE = Set.copyOf(SIMPLE_PALETTE_BLOCKS.stream()
-            .map(block -> "minecraft:" + block)
-            .toList());
+    /** Alchemod custom blocks usable in World Sketcher builds. */
+    public static final List<String> ALCHEMOD_PALETTE_BLOCKS = List.of(
+            "alchemod:arcane_bricks",
+            "alchemod:void_stone",
+            "alchemod:ether_crystal",
+            "alchemod:glowstone_bricks",
+            "alchemod:reinforced_obsidian",
+            "alchemod:alchemical_glass");
+
+    private static final Set<String> SIMPLE_PALETTE;
+
+    static {
+        // Combine vanilla blocks (prefixed with minecraft:) and mod blocks (already namespaced)
+        var combined = new java.util.HashSet<String>();
+        SIMPLE_PALETTE_BLOCKS.stream()
+                .map(b -> "minecraft:" + b)
+                .forEach(combined::add);
+        combined.addAll(ALCHEMOD_PALETTE_BLOCKS);
+        SIMPLE_PALETTE = Set.copyOf(combined);
+    }
 
     private static final ContextFactory FACTORY = new ContextFactory() {
         @Override
@@ -401,13 +418,30 @@ public final class BuilderRuntime {
         return value.trim().replace("\"", "").replace("'", "");
     }
 
+    /**
+     * Normalises a block ID and validates it against the palette.
+     * Accepts both plain names ("stone"), vanilla namespace ("minecraft:stone"),
+     * and alchemod namespace ("alchemod:arcane_bricks").
+     */
     private static String normaliseBlockId(String blockId) {
         String cleaned = blockId.trim().toLowerCase(Locale.ROOT);
-        String withNamespace = cleaned.contains(":") ? cleaned : "minecraft:" + cleaned;
-        if (!SIMPLE_PALETTE.contains(withNamespace)) {
-            throw new IllegalArgumentException("Builder palette does not allow block " + cleaned);
+        // Already fully namespaced
+        if (cleaned.contains(":")) {
+            if (!SIMPLE_PALETTE.contains(cleaned)) {
+                throw new IllegalArgumentException("Builder palette does not allow block " + cleaned);
+            }
+            return cleaned;
         }
-        return withNamespace;
+        // Bare name — try minecraft: first, then alchemod:
+        String withMinecraft = "minecraft:" + cleaned;
+        if (SIMPLE_PALETTE.contains(withMinecraft)) {
+            return withMinecraft;
+        }
+        String withAlchemod = "alchemod:" + cleaned;
+        if (SIMPLE_PALETTE.contains(withAlchemod)) {
+            return withAlchemod;
+        }
+        throw new IllegalArgumentException("Builder palette does not allow block " + cleaned);
     }
 
     public interface PlacementSink {

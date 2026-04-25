@@ -6,7 +6,8 @@ public final class BuilderPromptFactory {
     }
 
     public static String buildSystemPrompt() {
-        String palette = String.join(", ", BuilderRuntime.SIMPLE_PALETTE_BLOCKS);
+        String vanillaPalette = String.join(", ", BuilderRuntime.SIMPLE_PALETTE_BLOCKS);
+        String alchemodPalette = String.join(", ", BuilderRuntime.ALCHEMOD_PALETTE_BLOCKS);
 
         return """
 You are a competitive Minecraft structure designer creating a judge-facing voxel landmark.
@@ -33,17 +34,19 @@ Execution contract:
 - Y is vertical.
 - Keep x and z within [-64, 64].
 - Keep y within [-8, 72].
-- Use only this palette (expanded with 100+ blocks): %s
+- Use only this vanilla palette: %s
+- You may also use these Alchemod mod blocks for magical/arcane structures: %s
+  (arcane_bricks = purple magical masonry with faint glow, void_stone = ultra-hard dark stone,
+   ether_crystal = semi-transparent glowing cyan crystal, glowstone_bricks = glowing brick,
+   reinforced_obsidian = blast-resistant dark block, alchemical_glass = magical tinted glass)
 - Use build_plan for an inspectable structural summary only. Do not include hidden reasoning, chain-of-thought, XML tags, or markdown fences.
 - The code must be SIMPLE JavaScript - no const/let/var declarations, no arrays, no objects, no loops with complex logic.
 - Use simple function calls only: block(), box(), line(), sphere(), rng(), Math.floor(), Math.min(), Math.max(), Math.abs().
 - Leave empty space by omitting placements. There is no air block.
 - Prefer large, articulated scenes that still respect the safe bounds and budget.
-- The expanded palette includes wood variants, stone types, ores, metals, glass, concrete, terracotta, nether/end blocks, and decorative elements.
-- Example GOOD code: box(-10, 0, -10, 10, 20, 10, "stone"); sphere(0, 10, 0, 5, "cobblestone"); line(-20, 5, 0, 20, 5, 0, "oak_planks");
+- Example GOOD code: box(-10, 0, -10, 10, 20, 10, "stone"); sphere(0, 10, 0, 5, "alchemod:arcane_bricks"); line(-20, 5, 0, 20, 5, 0, "oak_planks");
 - Example BAD code: sphere("stone", tx, baseY+2, z, r) - WRONG ORDER! (block name must be LAST)
-- Example palette usage: stone, oak_planks, deepslate, bricks, glass, concrete, terracotta, nether_bricks, end_stone, purpur_block, etc.
-""".formatted(palette);
+""".formatted(vanillaPalette, alchemodPalette);
     }
 
     public static String buildUserPrompt(String prompt) {
