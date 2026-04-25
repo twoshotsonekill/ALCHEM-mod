@@ -2,6 +2,7 @@ package com.alchemod.screen;
 
 import com.alchemod.block.CreatorBlockEntity;
 import com.alchemod.creator.DynamicItem;
+import com.alchemod.item.OddityItem;
 import com.alchemod.resource.RuntimeTextureManager;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
@@ -15,9 +16,9 @@ public class CreatorScreen extends HandledScreen<CreatorScreenHandler> {
 
     private static final Identifier BG =
             Identifier.ofVanilla("textures/gui/container/furnace.png");
-    private static final int PANEL_BG = 0xCC1E1B29;
+    private static final int PANEL_BG   = 0xCC1E1B29;
     private static final int PANEL_SOFT = 0xAA312E3F;
-    private static final int ACCENT = 0xCCFB7185;
+    private static final int ACCENT     = 0xCCFB7185;
 
     private float animTimer = 0f;
 
@@ -44,9 +45,9 @@ public class CreatorScreen extends HandledScreen<CreatorScreenHandler> {
     protected void drawBackground(DrawContext ctx, float delta, int mx, int my) {
         ctx.drawTexture(RenderLayer::getGuiTextured, BG,
                 x, y, 0, 0, backgroundWidth, backgroundHeight, 256, 256);
-        ctx.fill(x + 8, y + 4, x + backgroundWidth - 8, y + 24, PANEL_BG);
-        ctx.fill(x + 8, y + 57, x + backgroundWidth - 8, y + 78, PANEL_SOFT);
-        ctx.fill(x + 8, y + 57, x + 10, y + 78, ACCENT);
+        ctx.fill(x + 8,  y + 4,  x + backgroundWidth - 8,  y + 24, PANEL_BG);
+        ctx.fill(x + 8,  y + 57, x + backgroundWidth - 8,  y + 78, PANEL_SOFT);
+        ctx.fill(x + 8,  y + 57, x + 10,                   y + 78, ACCENT);
 
         int state    = handler.getState();
         int progress = handler.getProgress();
@@ -57,7 +58,6 @@ public class CreatorScreen extends HandledScreen<CreatorScreenHandler> {
             drawProcessingEffect(ctx);
         }
 
-        // Progress arrow at gui pos (79, 34)
         int fill = switch (state) {
             case CreatorBlockEntity.STATE_READY      -> 24;
             case CreatorBlockEntity.STATE_PROCESSING -> progress * 24 / 100;
@@ -68,23 +68,13 @@ public class CreatorScreen extends HandledScreen<CreatorScreenHandler> {
                     x + 79, y + 34, 176, 14, fill, 16, 256, 256);
         }
 
-        // Output slot sprite overlay (absolute coords match slot at 116, 35)
         drawOutputSprite(ctx, state);
     }
 
-    /**
-     * drawForeground runs AFTER drawBackground and item rendering, in GUI-relative coords.
-     *
-     * Status sits at relative y=71 — the 14-px gap between SLOT_B bottom (y=69)
-     * and player inventory top (y=83).  We suppress the default "Inventory" label
-     * (relative y=72) to avoid overlap.
-     */
     @Override
     protected void drawForeground(DrawContext ctx, int mouseX, int mouseY) {
-        // Title
         ctx.drawText(textRenderer, title, titleX, titleY, 0xFCE7F3, false);
 
-        // Status — relative coords
         int state = handler.getState();
         String status = switch (state) {
             case CreatorBlockEntity.STATE_IDLE       -> "Place two items to create";
@@ -97,7 +87,7 @@ public class CreatorScreen extends HandledScreen<CreatorScreenHandler> {
             case CreatorBlockEntity.STATE_PROCESSING -> 0xAA44FF;
             case CreatorBlockEntity.STATE_READY      -> 0x22EE88;
             case CreatorBlockEntity.STATE_ERROR      -> 0xFF3333;
-            default -> 0x888888;
+            default                                  -> 0x888888;
         };
         int sx = (backgroundWidth - textRenderer.getWidth(status)) / 2;
         ctx.drawText(textRenderer, status, sx, 71, col, false);
@@ -105,8 +95,7 @@ public class CreatorScreen extends HandledScreen<CreatorScreenHandler> {
                 "Wild creator mode: weird junk, cursed tools, and explosive bows are fair game.",
                 12, 59, 0xFBCFE8, false);
 
-        // Intentionally NOT calling super to suppress the "Inventory" label at
-        // relative y=72, which would overlap with our status line at y=71.
+        // Suppress the default "Inventory" label at y=72 to avoid overlap with our status.
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -114,13 +103,15 @@ public class CreatorScreen extends HandledScreen<CreatorScreenHandler> {
     private void triggerSpriteGenerationIfNeeded() {
         if (handler.slots.size() < 3) return;
         ItemStack out = handler.slots.get(2).getStack();
-        if (out.isEmpty() || !(out.getItem() instanceof DynamicItem)) return;
-        RuntimeTextureManager.ensureForStack(out);
+        if (out.isEmpty()) return;
+        // Accept both new OddityItem and legacy DynamicItem stacks.
+        if (out.getItem() instanceof OddityItem || out.getItem() instanceof DynamicItem) {
+            RuntimeTextureManager.ensureForStack(out);
+        }
     }
 
     private void drawProcessingEffect(DrawContext ctx) {
-        int cx = x + 91;
-        int cy = y + 35;
+        int cx = x + 91, cy = y + 35;
         for (int i = 0; i < 6; i++) {
             double angle  = animTimer + i * (Math.PI / 3.0);
             double radius = 14 + Math.sin(animTimer * 2 + i) * 3;
@@ -135,12 +126,11 @@ public class CreatorScreen extends HandledScreen<CreatorScreenHandler> {
 
     private void drawOutputSprite(DrawContext ctx, int state) {
         if (state != CreatorBlockEntity.STATE_READY) return;
-        int lastSlot = handler.getLastCreatedSlot();
-        if (lastSlot < 0 || !RuntimeTextureManager.isLoaded(lastSlot)) return;
+        int uid = handler.getLastCreatedSlot();
+        if (uid < 0 || !RuntimeTextureManager.isLoaded(uid)) return;
 
-        Identifier texId = RuntimeTextureManager.getLoaded(lastSlot);
+        Identifier texId = RuntimeTextureManager.getLoaded(uid);
         ctx.drawTexture(RenderLayer::getGuiTextured, texId,
                 x + 116, y + 35, 0, 0, 16, 16, 16, 16);
     }
-
 }
