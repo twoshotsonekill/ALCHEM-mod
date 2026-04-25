@@ -129,7 +129,27 @@ public final class BuilderRuntime {
         }
     }
 
+    private static String cleanAiCode(String code) {
+        String cleaned = code;
+        cleaned = cleaned.replaceAll("const\\s+", "");
+        cleaned = cleaned.replaceAll("let\\s+", "");
+        cleaned = cleaned.replaceAll("var\\s+", "");
+        cleaned = cleaned.replaceAll("for\\s*\\([^)]+\\{", "");
+        cleaned = cleaned.replaceAll("\\}", "");
+        cleaned = cleaned.replaceAll("function\\s+\\w+\\s*\\([^)]*\\)\\s*\\{", "");
+        cleaned = cleaned.replaceAll("\\[", "");
+        cleaned = cleaned.replaceAll("\\]", "");
+        cleaned = cleaned.replaceAll("rng\\.noise\\d*", "rng");
+        cleaned = cleaned.replaceAll("\\.\\.\\.", "");
+        cleaned = cleaned.replaceAll("Math\\.sin\\([^)]+\\)", "0");
+        cleaned = cleaned.replaceAll("Math\\.cos\\([^)]+\\)", "0");
+        cleaned = cleaned.replaceAll("Math\\.sqrt\\([^)]+\\)", "0");
+        cleaned = cleaned.replaceAll("Math\\.pow\\([^)]+\\)", "0");
+        return cleaned;
+    }
+
     private static void executeScript(String code, int seed, PlacementController controller) {
+        String cleaned = cleanAiCode(code);
         Context context = FACTORY.enterContext();
         try {
             Scriptable scope = context.initSafeStandardObjects();
