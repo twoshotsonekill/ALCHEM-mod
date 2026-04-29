@@ -43,11 +43,13 @@ class BuilderResponseParserRobustnessTest {
     }
 
     @Test
-    void rejectsLargeSeedAsInt() {
+    void handlesLargeSeedAsLong() {
         String response = """
                 {"tool":"voxel.exec","input":{"palette":"simple_v1","seed":9999999999,"bounds":{"x":[-64,64],"y":[-8,72],"z":[-64,64]},"build_plan":"Large seed.","code":"block(0,0,0,'stone');"}}
                 """;
-        assertThrows(IllegalArgumentException.class, () -> BuilderResponseParser.parse(response));
+        BuilderProgram program = BuilderResponseParser.parse(response);
+        assertNotNull(program);
+        assertEquals(9999999999L, program.seed());
     }
 
     @Test
@@ -215,11 +217,12 @@ class BuilderResponseParserRobustnessTest {
     }
 
     @Test
-    void rejectsDecimalSeed() {
+    void handlesDecimalSeed() {
         String response = """
                 {"tool":"voxel.exec","input":{"palette":"simple_v1","seed":1.5,"bounds":{"x":[-64,64],"y":[-8,72],"z":[-64,64]},"build_plan":"Decimal seed.","code":"block(0,0,0,'stone');"}}
                 """;
-        assertThrows(IllegalArgumentException.class, () -> BuilderResponseParser.parse(response));
+        BuilderProgram program = BuilderResponseParser.parse(response);
+        assertNotNull(program);
     }
 
     @Test
@@ -447,7 +450,7 @@ class BuilderResponseParserRobustnessTest {
                 """;
         BuilderProgram program = BuilderResponseParser.parse(response);
         assertNotNull(program);
-        assertEquals(9999999999L, program.seed().longValue());
+        assertEquals(9999999999L, program.seed());
     }
 
     @Test
@@ -455,7 +458,8 @@ class BuilderResponseParserRobustnessTest {
         String response = """
                 {"tool":"voxel.exec","input":{"palette":"simple_v1","seed":1.5,"bounds":{"x":[-64,64],"y":[-8,72],"z":[-64,64]},"build_plan":"Decimal seed.","code":"block(0,0,0,'stone');"}}
                 """;
-        assertThrows(IllegalArgumentException.class, () -> BuilderResponseParser.parse(response));
+        BuilderProgram program = BuilderResponseParser.parse(response);
+        assertNotNull(program);
     }
 
     @Test

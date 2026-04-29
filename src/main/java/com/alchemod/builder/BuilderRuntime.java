@@ -107,7 +107,7 @@ public final class BuilderRuntime {
     }
 
     public static ExecutionResult execute(BuilderProgram program, int fallbackSeed, PlacementSink sink) {
-        int seed = program.seed() != null ? program.seed() : fallbackSeed;
+        int seed = program.seed() != null ? program.seed().intValue() : fallbackSeed;
         PlacementController controller = new PlacementController(sink);
 
         if (program.legacyFallback()) {

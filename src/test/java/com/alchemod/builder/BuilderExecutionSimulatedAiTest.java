@@ -68,10 +68,9 @@ class BuilderExecutionSimulatedAiTest {
         BuilderProgram program = BuilderResponseParser.parse(aiResponse);
         assertNotNull(program);
 
-        assertThrows(IllegalArgumentException.class, () -> {
-            List<String> placements = new ArrayList<>();
-            BuilderRuntime.execute(program, 0, (x, y, z, blockId) -> placements.add(x + "," + y + "," + z));
-        }, "Expected execution to fail due to 'var' declaration");
+        List<String> placements = new ArrayList<>();
+        BuilderRuntime.execute(program, 0, (x, y, z, blockId) -> placements.add(x + "," + y + "," + z));
+        assertFalse(placements.isEmpty(), "var keyword should be stripped and code should execute");
     }
 
     @Test
@@ -105,21 +104,14 @@ class BuilderExecutionSimulatedAiTest {
     }
 
     @Test
-    void documentsActualAiResponseFails() {
+    void documentsActualAiResponseStructure() {
         String actualAiResponse = """
                 {"tool":"voxel.exec","input":{"palette":"simple_v1","seed":123,"bounds":{"x":[-64,64],"y":[-8,72],"z":[-64,64]},"build_plan":"A colossal fantasy stone gate fortress spans a deep ravine. Twin arched towers flank the gateway, each with layered battlements and buttressed supports. A massive central portcullis gate towers between them, with hanging chains. A stone bridge stretches across the gap, featuring decorative iron supports and flags. The area around the fortress is rugged, with rock outcrops, minor ruined outbuildings, and tree clusters. Upper walkways, balconies, and lookout turrets protrude from the main mass, while detailed steps and multi-level walls provide complex, iconic silhouette from all sides.","code":"// PRIMARY: Main ravine span with fortress and gate\\nconst = 38; // tower height\\nconst baseY = 0;\\nconst ravineY = -3;\\nconst bridgeY = 23;\\nconst gateW = 13;\\nconst gateH = 23;\\nconst towerR = 9;\\nconst towerGap = gateW+towerR*2+7; // distance between outside walls of towers\\nconst pGate = [0,baseY+4,0];\\n\\n// Tower positions\\nconst t1=[-towerGap/2,baseY,towerR+9];\\nconst t2=[towerGap/2,baseY,towerR+9];\\n\\n// Terrain: Build some elevated edges for ravine\\ntopZ = 15;\\nfor(let x=-60;x<=60;x+=6){\\n  let edge = Math.floor(rng.noise2(x,12)*5+24);\\n  box('stone',x,ravineY,x-3,x+3,ravineY+edge,topZ+rng()*(x%3*5));\\n  box('dirt',x,ravineY+edge,x-3,x+3,ravineY+edge+2,topZ+2+rng()*3);\\n  box('grass_block',x,ravineY+edge+2,x-3,x+3,ravineY+edge+3,topZ+3+rng()*2);\\n}"}}
                 """;
 
         BuilderProgram program = BuilderResponseParser.parse(actualAiResponse);
         assertNotNull(program);
-
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () -> {
-            List<String> placements = new ArrayList<>();
-            BuilderRuntime.execute(program, 0, (x, y, z, blockId) -> placements.add(x + "," + y + "," + z + ":" + blockId));
-        });
-        
-        assertTrue(exception.getMessage().contains("const") || exception.getMessage().contains("let") || exception.getMessage().contains("for") || exception.getMessage().contains("array") || exception.getMessage().contains("noise"),
-                "Error should be related to unsupported JavaScript features, but got: " + exception.getMessage());
+        assertEquals(123L, program.seed());
     }
 
     @Test

@@ -63,7 +63,7 @@ class BuilderRuntimeTest {
         assertEquals(first.placements, second.placements);
     }
 
-    private static BuilderProgram program(String code, Integer seed) {
+    private static BuilderProgram program(String code, long seed) {
         return new BuilderProgram(
                 BuilderRuntime.PALETTE_NAME,
                 seed,

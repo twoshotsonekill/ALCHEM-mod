@@ -2,7 +2,7 @@ package com.alchemod.builder;
 
 public record BuilderProgram(
         String palette,
-        Integer seed,
+        Long seed,
         Bounds bounds,
         String buildPlan,
         String code,

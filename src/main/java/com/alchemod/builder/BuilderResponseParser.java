@@ -65,13 +65,13 @@ public final class BuilderResponseParser {
             throw new IllegalArgumentException("Builder response code must be a non-empty string");
         }
 
-        Integer seed = null;
+        Long seed = null;
         if (input.has("seed") && !input.get("seed").isJsonNull()) {
             JsonElement seedElement = input.get("seed");
             if (!seedElement.isJsonPrimitive() || !seedElement.getAsJsonPrimitive().isNumber()) {
                 throw new IllegalArgumentException("Builder response seed must be a number");
             }
-            seed = seedElement.getAsInt();
+            seed = seedElement.getAsLong();
         }
 
         return new BuilderProgram(palette, seed, bounds, buildPlan.trim(), code, false);

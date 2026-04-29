@@ -1,0 +1,44 @@
+package com.alchemod;
+
+import com.alchemod.creator.DynamicItemRegistry;
+import com.alchemod.resource.DynamicItemRenderer;
+import com.alchemod.screen.BuilderScreen;
+import com.alchemod.screen.CreatorScreen;
+import com.alchemod.screen.ForgeScreen;
+import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.api.EnvType;
+import net.fabricmc.api.Environment;
+import net.fabricmc.fabric.api.blockrenderlayer.v1.BlockRenderLayerMap;
+import net.fabricmc.fabric.api.client.rendering.v1.BuiltinItemRendererRegistry;
+import net.minecraft.client.gui.screen.ingame.HandledScreens;
+import net.minecraft.client.render.RenderLayer;
+
+@Environment(EnvType.CLIENT)
+public class AlchemodClient implements ClientModInitializer {
+
+    @Override
+    public void onInitializeClient() {
+        // ── Screens ───────────────────────────────────────────────────────────
+        HandledScreens.register(AlchemodInit.FORGE_HANDLER, ForgeScreen::new);
+        HandledScreens.register(AlchemodInit.CREATOR_HANDLER, CreatorScreen::new);
+        HandledScreens.register(AlchemodInit.BUILDER_HANDLER, BuilderScreen::new);
+
+        // ── Dynamic item renderers ────────────────────────────────────────────
+        // Register the BuiltinItemRenderer for every slot in the dynamic pool so
+        // the runtime-generated sprite is shown in inventory, hotbar, hand, and
+        // item frames — not the static atlas texture baked at startup.
+        for (int i = 0; i < DynamicItemRegistry.POOL_SIZE; i++) {
+            var item = DynamicItemRegistry.getSlot(i);
+            if (item != null) {
+                BuiltinItemRendererRegistry.INSTANCE.register(item, DynamicItemRenderer.INSTANCE);
+            }
+        }
+
+        // ── Transparent block render layers ───────────────────────────────────
+        // Blocks with nonOpaque() need their render layer declared client-side.
+        BlockRenderLayerMap.INSTANCE.putBlock(
+                AlchemodInit.ALCHEMICAL_GLASS_BLOCK, RenderLayer.getTranslucent());
+        BlockRenderLayerMap.INSTANCE.putBlock(
+                AlchemodInit.ETHER_CRYSTAL_BLOCK, RenderLayer.getTranslucent());
+    }
+}
