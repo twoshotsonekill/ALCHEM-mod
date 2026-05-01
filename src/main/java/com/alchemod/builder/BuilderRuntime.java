@@ -78,7 +78,6 @@ public final class BuilderRuntime {
     private static final Set<String> SIMPLE_PALETTE;
 
     static {
-        // Combine vanilla blocks (prefixed with minecraft:) and mod blocks (already namespaced)
         var combined = new java.util.HashSet<String>();
         SIMPLE_PALETTE_BLOCKS.stream()
                 .map(b -> "minecraft:" + b)
@@ -107,7 +106,7 @@ public final class BuilderRuntime {
     }
 
     public static ExecutionResult execute(BuilderProgram program, int fallbackSeed, PlacementSink sink) {
-        int seed = program.seed() != null ? program.seed().intValue() : fallbackSeed;
+        int seed = program.seed() != null ? (int)(long) program.seed() : fallbackSeed;
         PlacementController controller = new PlacementController(sink);
 
         if (program.legacyFallback()) {
@@ -134,8 +133,6 @@ public final class BuilderRuntime {
         cleaned = cleaned.replaceAll("const\\s+", "");
         cleaned = cleaned.replaceAll("let\\s+", "");
         cleaned = cleaned.replaceAll("var\\s+", "");
-        cleaned = cleaned.replaceAll("for\\s*\\([^)]+\\{", "");
-        cleaned = cleaned.replaceAll("\\}", "");
         cleaned = cleaned.replaceAll("function\\s+\\w+\\s*\\([^)]*\\)\\s*\\{", "");
         cleaned = cleaned.replaceAll("\\[", "");
         cleaned = cleaned.replaceAll("\\]", "");
@@ -149,7 +146,10 @@ public final class BuilderRuntime {
     }
 
     private static void executeScript(String code, int seed, PlacementController controller) {
+        // BUG FIX: cleanAiCode() was computed but the original `code` was passed to
+        // evaluateString instead of `cleaned`, making the whole sanitisation step a no-op.
         String cleaned = cleanAiCode(code);
+
         Context context = FACTORY.enterContext();
         try {
             Scriptable scope = context.initSafeStandardObjects();
@@ -247,7 +247,8 @@ public final class BuilderRuntime {
                 return Undefined.instance;
             }));
 
-            context.evaluateString(scope, code, "builder_program", 1, null);
+            // BUG FIX: was `code` — now correctly passes the sanitised string
+            context.evaluateString(scope, cleaned, "builder_program", 1, null);
         } catch (RhinoException e) {
             throw new IllegalArgumentException("Builder script runtime error: " + e.getLocalizedMessage(), e);
         } catch (Error e) {
@@ -292,84 +293,52 @@ public final class BuilderRuntime {
     }
 
     private static void executeLegacyBlock(List<String> args, PlacementController controller) {
-        if (args.size() != 4) {
-            throw new IllegalArgumentException("block() expects 4 arguments");
-        }
+        if (args.size() != 4) throw new IllegalArgumentException("block() expects 4 arguments");
         controller.place(
-                parseInt(args.get(0)),
-                parseInt(args.get(1)),
-                parseInt(args.get(2)),
+                parseInt(args.get(0)), parseInt(args.get(1)), parseInt(args.get(2)),
                 normaliseBlockId(stripQuotes(args.get(3))));
     }
 
     private static void executeLegacyBox(List<String> args, PlacementController controller) {
-        if (args.size() != 7) {
-            throw new IllegalArgumentException("box() expects 7 arguments");
-        }
-        int x1 = parseInt(args.get(0));
-        int y1 = parseInt(args.get(1));
-        int z1 = parseInt(args.get(2));
-        int x2 = parseInt(args.get(3));
-        int y2 = parseInt(args.get(4));
-        int z2 = parseInt(args.get(5));
+        if (args.size() != 7) throw new IllegalArgumentException("box() expects 7 arguments");
+        int x1 = parseInt(args.get(0)), y1 = parseInt(args.get(1)), z1 = parseInt(args.get(2));
+        int x2 = parseInt(args.get(3)), y2 = parseInt(args.get(4)), z2 = parseInt(args.get(5));
         String blockId = normaliseBlockId(stripQuotes(args.get(6)));
-
-        for (int x = Math.min(x1, x2); x <= Math.max(x1, x2); x++) {
-            for (int y = Math.min(y1, y2); y <= Math.max(y1, y2); y++) {
-                for (int z = Math.min(z1, z2); z <= Math.max(z1, z2); z++) {
+        for (int x = Math.min(x1, x2); x <= Math.max(x1, x2); x++)
+            for (int y = Math.min(y1, y2); y <= Math.max(y1, y2); y++)
+                for (int z = Math.min(z1, z2); z <= Math.max(z1, z2); z++)
                     controller.place(x, y, z, blockId);
-                }
-            }
-        }
     }
 
     private static void executeLegacyLine(List<String> args, PlacementController controller) {
-        if (args.size() != 7) {
-            throw new IllegalArgumentException("line() expects 7 arguments");
-        }
-        int x1 = parseInt(args.get(0));
-        int y1 = parseInt(args.get(1));
-        int z1 = parseInt(args.get(2));
-        int x2 = parseInt(args.get(3));
-        int y2 = parseInt(args.get(4));
-        int z2 = parseInt(args.get(5));
+        if (args.size() != 7) throw new IllegalArgumentException("line() expects 7 arguments");
+        int x1 = parseInt(args.get(0)), y1 = parseInt(args.get(1)), z1 = parseInt(args.get(2));
+        int x2 = parseInt(args.get(3)), y2 = parseInt(args.get(4)), z2 = parseInt(args.get(5));
         String blockId = normaliseBlockId(stripQuotes(args.get(6)));
         int steps = Math.max(Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1)), Math.abs(z2 - z1));
         steps = Math.max(steps, 1);
-
         for (int step = 0; step <= steps; step++) {
             double t = step / (double) steps;
-            int x = (int) Math.floor(x1 + ((x2 - x1) * t));
-            int y = (int) Math.floor(y1 + ((y2 - y1) * t));
-            int z = (int) Math.floor(z1 + ((z2 - z1) * t));
-            controller.place(x, y, z, blockId);
+            controller.place((int) Math.floor(x1 + (x2 - x1) * t),
+                             (int) Math.floor(y1 + (y2 - y1) * t),
+                             (int) Math.floor(z1 + (z2 - z1) * t), blockId);
         }
     }
 
     private static void executeLegacySphere(List<String> args, PlacementController controller) {
-        if (args.size() != 5) {
-            throw new IllegalArgumentException("sphere() expects 5 arguments");
-        }
-        int centerX = parseInt(args.get(0));
-        int centerY = parseInt(args.get(1));
-        int centerZ = parseInt(args.get(2));
+        if (args.size() != 5) throw new IllegalArgumentException("sphere() expects 5 arguments");
+        int cx = parseInt(args.get(0)), cy = parseInt(args.get(1)), cz = parseInt(args.get(2));
         int radius = Math.abs(parseInt(args.get(3)));
         String blockId = normaliseBlockId(stripQuotes(args.get(4)));
-
-        if (radius > MAX_SPHERE_RADIUS) {
+        if (radius > MAX_SPHERE_RADIUS)
             throw new IllegalArgumentException("sphere() radius exceeds the safe limit of " + MAX_SPHERE_RADIUS);
-        }
-
-        for (int x = -radius; x <= radius; x++) {
-            for (int y = -radius; y <= radius; y++) {
+        for (int x = -radius; x <= radius; x++)
+            for (int y = -radius; y <= radius; y++)
                 for (int z = -radius; z <= radius; z++) {
-                    double distance = Math.sqrt((x * x) + (y * y) + (z * z));
-                    if (distance <= radius && distance >= radius - 1.2) {
-                        controller.place(centerX + x, centerY + y, centerZ + z, blockId);
-                    }
+                    double d = Math.sqrt(x*x + y*y + z*z);
+                    if (d <= radius && d >= radius - 1.2)
+                        controller.place(cx + x, cy + y, cz + z, blockId);
                 }
-            }
-        }
     }
 
     private static List<String> sanitiseLegacyCommands(String code) {
@@ -377,15 +346,9 @@ public final class BuilderRuntime {
         List<String> commands = new ArrayList<>();
         for (String rawLine : lines) {
             String line = rawLine.trim();
-            if (line.isEmpty() || line.startsWith("//")) {
-                continue;
-            }
-            if (line.endsWith(";")) {
-                line = line.substring(0, line.length() - 1).trim();
-            }
-            if (!line.matches("[a-zA-Z_]+\\s*\\(.*\\)")) {
-                continue;
-            }
+            if (line.isEmpty() || line.startsWith("//")) continue;
+            if (line.endsWith(";")) line = line.substring(0, line.length() - 1).trim();
+            if (!line.matches("[a-zA-Z_]+\\s*\\(.*\\)")) continue;
             commands.add(line);
         }
         return commands;
@@ -396,110 +359,66 @@ public final class BuilderRuntime {
         StringBuilder current = new StringBuilder();
         boolean inString = false;
         char stringDelimiter = 0;
-
-        for (int index = 0; index < rawArgs.length(); index++) {
-            char currentChar = rawArgs.charAt(index);
-            if ((currentChar == '"' || currentChar == '\'') && (index == 0 || rawArgs.charAt(index - 1) != '\\')) {
-                if (!inString) {
-                    inString = true;
-                    stringDelimiter = currentChar;
-                } else if (stringDelimiter == currentChar) {
-                    inString = false;
-                }
-                current.append(currentChar);
+        for (int i = 0; i < rawArgs.length(); i++) {
+            char c = rawArgs.charAt(i);
+            if ((c == '"' || c == '\'') && (i == 0 || rawArgs.charAt(i - 1) != '\\')) {
+                if (!inString) { inString = true; stringDelimiter = c; }
+                else if (stringDelimiter == c) { inString = false; }
+                current.append(c);
                 continue;
             }
-
-            if (currentChar == ',' && !inString) {
+            if (c == ',' && !inString) {
                 args.add(current.toString().trim());
                 current.setLength(0);
                 continue;
             }
-
-            current.append(currentChar);
+            current.append(c);
         }
-
-        if (current.length() > 0) {
-            args.add(current.toString().trim());
-        }
-
+        if (current.length() > 0) args.add(current.toString().trim());
         return args;
     }
 
-    private static int parseInt(String value) {
-        return Integer.parseInt(value.trim());
-    }
+    private static int parseInt(String value) { return Integer.parseInt(value.trim()); }
+    private static int toInt(Object value) { return (int) Math.round(Context.toNumber(value)); }
+    private static String stripQuotes(String value) { return value.trim().replace("\"", "").replace("'", ""); }
 
-    private static int toInt(Object value) {
-        return (int) Math.round(Context.toNumber(value));
-    }
-
-    private static String stripQuotes(String value) {
-        return value.trim().replace("\"", "").replace("'", "");
-    }
-
-    /**
-     * Normalises a block ID and validates it against the palette.
-     * Accepts both plain names ("stone"), vanilla namespace ("minecraft:stone"),
-     * and alchemod namespace ("alchemod:arcane_bricks").
-     */
     private static String normaliseBlockId(String blockId) {
         String cleaned = blockId.trim().toLowerCase(Locale.ROOT);
-        // Already fully namespaced
         if (cleaned.contains(":")) {
-            if (!SIMPLE_PALETTE.contains(cleaned)) {
+            if (!SIMPLE_PALETTE.contains(cleaned))
                 throw new IllegalArgumentException("Builder palette does not allow block " + cleaned);
-            }
             return cleaned;
         }
-        // Bare name — try minecraft: first, then alchemod:
         String withMinecraft = "minecraft:" + cleaned;
-        if (SIMPLE_PALETTE.contains(withMinecraft)) {
-            return withMinecraft;
-        }
+        if (SIMPLE_PALETTE.contains(withMinecraft)) return withMinecraft;
         String withAlchemod = "alchemod:" + cleaned;
-        if (SIMPLE_PALETTE.contains(withAlchemod)) {
-            return withAlchemod;
-        }
+        if (SIMPLE_PALETTE.contains(withAlchemod)) return withAlchemod;
         throw new IllegalArgumentException("Builder palette does not allow block " + cleaned);
     }
 
-    public interface PlacementSink {
-        void place(int x, int y, int z, String blockId);
-    }
-
-    public record ExecutionResult(int placements, int seedUsed, boolean legacyFallback) {
-    }
-
-    private interface Primitive {
-        Object call(Object[] args);
-    }
+    public interface PlacementSink { void place(int x, int y, int z, String blockId); }
+    public record ExecutionResult(int placements, int seedUsed, boolean legacyFallback) {}
+    private interface Primitive { Object call(Object[] args); }
 
     private static final class PlacementController {
         private final PlacementSink sink;
         private int placements;
 
-        private PlacementController(PlacementSink sink) {
-            this.sink = sink;
-        }
+        private PlacementController(PlacementSink sink) { this.sink = sink; }
 
         private void place(int x, int y, int z, String blockId) {
             validateRelativePosition(x, y, z);
-            if (placements >= MAX_BLOCK_PLACEMENTS) {
+            if (placements >= MAX_BLOCK_PLACEMENTS)
                 throw new IllegalArgumentException("Generated structure exceeded safe block budget");
-            }
             placements++;
             sink.place(x, y, z, blockId);
         }
 
-        private int placements() {
-            return placements;
-        }
+        private int placements() { return placements; }
     }
 
     private static void validateRelativePosition(int x, int y, int z) {
-        if (Math.abs(x) > MAX_XZ_OFFSET || Math.abs(z) > MAX_XZ_OFFSET || y < MIN_Y_OFFSET || y > MAX_Y_OFFSET) {
+        if (Math.abs(x) > MAX_XZ_OFFSET || Math.abs(z) > MAX_XZ_OFFSET || y < MIN_Y_OFFSET || y > MAX_Y_OFFSET)
             throw new IllegalArgumentException("Generated structure exceeded the safe build bounds");
-        }
     }
 }

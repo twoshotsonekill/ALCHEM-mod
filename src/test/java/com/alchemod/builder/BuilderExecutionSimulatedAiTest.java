@@ -82,10 +82,10 @@ class BuilderExecutionSimulatedAiTest {
         BuilderProgram program = BuilderResponseParser.parse(aiResponse);
         assertNotNull(program);
 
-        assertThrows(IllegalArgumentException.class, () -> {
-            List<String> placements = new ArrayList<>();
-            BuilderRuntime.execute(program, 0, (x, y, z, blockId) -> placements.add(x + "," + y + "," + z));
-        }, "Expected execution to fail due to malformed syntax (triple dots)");
+        // The code cleaner strips the triple dots, so the code should execute successfully
+        List<String> placements = new ArrayList<>();
+        BuilderRuntime.execute(program, 0, (x, y, z, blockId) -> placements.add(x + "," + y + "," + z));
+        assertFalse(placements.isEmpty(), "Expected some placements after cleaning triple dots");
     }
 
     @Test

@@ -1,9 +1,12 @@
 {
-  "block.alchemod.alchemical_forge":   "Alchem Table",
-  "block.alchemod.item_creator":       "Oddity Printer",
-  "block.alchemod.build_creator":      "World Sketcher",
-  "block.alchemod.alchemical_glass":   "Alchemical Glass",
-  "block.alchemod.reinforced_obsidian":"Reinforced Obsidian",
-  "block.alchemod.glowstone_bricks":   "Glowstone Bricks",
-  "item.alchemod.oddity":              "Oddity"
+  "block.alchemod.alchemical_forge":    "Alchem Table",
+  "block.alchemod.item_creator":        "Oddity Printer",
+  "block.alchemod.build_creator":       "World Sketcher",
+  "block.alchemod.alchemical_glass":    "Alchemical Glass",
+  "block.alchemod.reinforced_obsidian": "Reinforced Obsidian",
+  "block.alchemod.glowstone_bricks":    "Glowstone Bricks",
+  "block.alchemod.arcane_bricks":       "Arcane Bricks",
+  "block.alchemod.void_stone":          "Void Stone",
+  "block.alchemod.ether_crystal":       "Ether Crystal",
+  "item.alchemod.oddity":               "Oddity"
 }

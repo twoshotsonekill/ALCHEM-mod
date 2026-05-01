@@ -15,6 +15,7 @@ import com.alchemod.block.ReinforcedObsidianBlock;
 import com.alchemod.block.VoidStoneBlock;
 import com.alchemod.creator.DynamicItemRegistry;
 import com.alchemod.event.ItemAbilityEvents;
+import com.alchemod.item.OddityItem;
 import com.alchemod.network.BuilderPromptPayload;
 import com.alchemod.network.ForgeNbtPayload;
 import com.alchemod.screen.BuilderScreenHandler;
@@ -57,15 +58,13 @@ public class AlchemodInit implements ModInitializer {
     public static Block BUILDER_BLOCK;
     public static Item BUILDER_ITEM;
 
-    // Existing decorative blocks
+    // Decorative blocks
     public static Block ALCHEMICAL_GLASS_BLOCK;
     public static Item ALCHEMICAL_GLASS_ITEM;
     public static Block REINFORCED_OBSIDIAN_BLOCK;
     public static Item REINFORCED_OBSIDIAN_ITEM;
     public static Block GLOWSTONE_BRICKS_BLOCK;
     public static Item GLOWSTONE_BRICKS_ITEM;
-
-    // New decorative blocks
     public static Block ARCANE_BRICKS_BLOCK;
     public static Item ARCANE_BRICKS_ITEM;
     public static Block VOID_STONE_BLOCK;
@@ -162,9 +161,7 @@ public class AlchemodInit implements ModInitializer {
                 new BlockItem(GLOWSTONE_BRICKS_BLOCK, new Item.Settings()
                         .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "glowstone_bricks")))));
 
-        // ── New blocks ────────────────────────────────────────────────────────
-
-        // Arcane Bricks — purple magical masonry, moderate hardness, faint glow
+        // Arcane Bricks
         ARCANE_BRICKS_BLOCK = Registry.register(
                 Registries.BLOCK, Identifier.of(MOD_ID, "arcane_bricks"),
                 new ArcaneBricksBlock(AbstractBlock.Settings.create()
@@ -177,7 +174,7 @@ public class AlchemodInit implements ModInitializer {
                 new BlockItem(ARCANE_BRICKS_BLOCK, new Item.Settings()
                         .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "arcane_bricks")))));
 
-        // Void Stone — near-indestructible dark stone with a dim inner light
+        // Void Stone
         VOID_STONE_BLOCK = Registry.register(
                 Registries.BLOCK, Identifier.of(MOD_ID, "void_stone"),
                 new VoidStoneBlock(AbstractBlock.Settings.create()
@@ -190,7 +187,7 @@ public class AlchemodInit implements ModInitializer {
                 new BlockItem(VOID_STONE_BLOCK, new Item.Settings()
                         .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "void_stone")))));
 
-        // Ether Crystal — semi-transparent, bright glowing cyan crystal
+        // Ether Crystal
         ETHER_CRYSTAL_BLOCK = Registry.register(
                 Registries.BLOCK, Identifier.of(MOD_ID, "ether_crystal"),
                 new EtherCrystalBlock(AbstractBlock.Settings.create()
@@ -204,7 +201,16 @@ public class AlchemodInit implements ModInitializer {
                 new BlockItem(ETHER_CRYSTAL_BLOCK, new Item.Settings()
                         .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "ether_crystal")))));
 
-        // ─────────────────────────────────────────────────────────────────────
+        // BUG FIX: OddityItem was never registered in the Minecraft item registry, and
+        // DynamicItemRegistry.registerOddity() was never called. This meant ODDITY_ITEM
+        // was always null, so CreatorBlockEntity.applyResult() always fell through to the
+        // legacy 64-slot pool. After 64 crafts, players received nothing.
+        OddityItem oddityItem = Registry.register(
+                Registries.ITEM, Identifier.of(MOD_ID, "oddity"),
+                new OddityItem(new Item.Settings()
+                        .maxCount(1)
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "oddity")))));
+        DynamicItemRegistry.registerOddity(oddityItem);
 
         DynamicItemRegistry.register();
         ItemAbilityEvents.register();
@@ -234,11 +240,9 @@ public class AlchemodInit implements ModInitializer {
                 new ScreenHandlerType<>(BuilderScreenHandler::new, FeatureSet.empty()));
 
         net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playC2S().register(
-                BuilderPromptPayload.ID,
-                BuilderPromptPayload.CODEC);
+                BuilderPromptPayload.ID, BuilderPromptPayload.CODEC);
         net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playC2S().register(
-                ForgeNbtPayload.ID,
-                ForgeNbtPayload.CODEC);
+                ForgeNbtPayload.ID, ForgeNbtPayload.CODEC);
 
         net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(
                 BuilderPromptPayload.ID, (payload, context) -> {
@@ -253,9 +257,7 @@ public class AlchemodInit implements ModInitializer {
                         var be = world.getBlockEntity(targetPos);
                         if (be instanceof BuilderBlockEntity builder) {
                             double dist = player.squaredDistanceTo(
-                                    targetPos.getX() + 0.5,
-                                    targetPos.getY() + 0.5,
-                                    targetPos.getZ() + 0.5);
+                                    targetPos.getX() + 0.5, targetPos.getY() + 0.5, targetPos.getZ() + 0.5);
                             if (dist <= 64.0) {
                                 builder.receivePrompt(payload.prompt(), world);
                             } else {
@@ -277,10 +279,8 @@ public class AlchemodInit implements ModInitializer {
                                     forge.getPos().getZ() + 0.5);
                             if (dist <= 64.0) {
                                 forge.applyCustomData(
-                                        payload.customName(),
-                                        payload.customLore(),
-                                        payload.customColor(),
-                                        payload.customEnchantments(),
+                                        payload.customName(), payload.customLore(),
+                                        payload.customColor(), payload.customEnchantments(),
                                         payload.hideFlags());
                             }
                         }
