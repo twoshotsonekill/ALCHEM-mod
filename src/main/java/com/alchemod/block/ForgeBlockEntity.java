@@ -3,6 +3,11 @@ package com.alchemod.block;
 import com.alchemod.AlchemodInit;
 import com.alchemod.ai.OpenRouterClient;
 import com.alchemod.screen.ForgeScreenHandler;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonSyntaxException;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.entity.BlockEntity;
@@ -58,27 +63,30 @@ public class ForgeBlockEntity extends BlockEntity
     public static final int STATE_ERROR      = 3;
 
     // Progress constants (synced at index 1)
-    private static final int MAX_PROGRESS = 80; // ~4 seconds at 20 tps
+    private static final int MAX_PROGRESS = 80;
 
     private final DefaultedList<ItemStack> items =
             DefaultedList.ofSize(3, ItemStack.EMPTY);
 
-    private int state = STATE_IDLE;
+    private int state    = STATE_IDLE;
     private int progress = 0;
     private boolean aiPending = false;
 
-    // NBT metadata for custom output
-    private String customName = "";
-    private String customLore = "";
-    private int customColor = -1;
+    // Last result info for GUI display
+    private String lastResultName  = "";
+    private String lastResultRarity = "";
+
+    // Manual NBT overrides (kept for power-user payload from ForgeNbtPayload)
+    private String customName         = "";
+    private String customLore         = "";
+    private int    customColor        = -1;
     private List<String> customEnchantments = new ArrayList<>();
     private int hideFlags = 0;
 
-    // Two ints synced to client: state + progress
     private final PropertyDelegate delegate = new PropertyDelegate() {
-        @Override public int get(int i) { return i == 0 ? state : progress; }
-        @Override public void set(int i, int v) { if (i == 0) state = v; else progress = v; }
-        @Override public int size() { return 2; }
+        @Override public int  get(int i)       { return i == 0 ? state : progress; }
+        @Override public void set(int i, int v){ if (i == 0) state = v; else progress = v; }
+        @Override public int  size()           { return 2; }
     };
 
     public ForgeBlockEntity(BlockPos pos, BlockState state) {
@@ -86,8 +94,8 @@ public class ForgeBlockEntity extends BlockEntity
     }
 
     // ── Server tick ───────────────────────────────────────────────────────────
+
     public void serverTick(World world, BlockPos pos) {
-        // Start processing when both inputs are filled and output is empty
         if (state == STATE_IDLE
                 && !items.get(SLOT_A).isEmpty()
                 && !items.get(SLOT_B).isEmpty()
@@ -95,126 +103,281 @@ public class ForgeBlockEntity extends BlockEntity
                 && !aiPending) {
             startCombination(world);
         }
-
-        // Animate progress bar while waiting for AI
         if (state == STATE_PROCESSING) {
-            progress = Math.min(progress + 1, MAX_PROGRESS - 1); // stop just before done
+            progress = Math.min(progress + 1, MAX_PROGRESS - 1);
             markDirty();
         }
     }
 
-    // ── Kick off the OpenRouter request on a worker thread ────────────────────
+    // ── Kick off AI request ───────────────────────────────────────────────────
+
     private void startCombination(World world) {
         aiPending = true;
-        state = STATE_PROCESSING;
-        progress = 0;
+        state     = STATE_PROCESSING;
+        progress  = 0;
+        lastResultName   = "";
+        lastResultRarity = "";
         markDirty();
 
         String itemA = items.get(SLOT_A).getName().getString()
-                       + " (" + Registries.ITEM.getId(items.get(SLOT_A).getItem()) + ")";
+                + " (" + Registries.ITEM.getId(items.get(SLOT_A).getItem()) + ")";
         String itemB = items.get(SLOT_B).getName().getString()
-                       + " (" + Registries.ITEM.getId(items.get(SLOT_B).getItem()) + ")";
+                + " (" + Registries.ITEM.getId(items.get(SLOT_B).getItem()) + ")";
 
-        AlchemodInit.LOG.info("[Alchemod] Combining: {} + {}", itemA, itemB);
+        AlchemodInit.LOG.info("[Forge] Combining: {} + {}", itemA, itemB);
 
         CompletableFuture.supplyAsync(() -> queryOpenRouter(itemA, itemB))
-                .thenAccept(resultId -> {
+                .thenAccept(result -> {
                     if (world.getServer() != null) {
-                        world.getServer().execute(() -> applyResult(resultId));
+                        world.getServer().execute(() -> applyResult(result));
                     }
                 });
     }
 
-    // ── OpenRouter API call via centralized client ────────────────────────────
-    private String queryOpenRouter(String itemA, String itemB) {
+    // ── AI request — returns JSON with item identity + optional enrichment ────
+
+    private ForgeResult queryOpenRouter(String itemA, String itemB) {
         String key = AlchemodInit.OPENROUTER_KEY;
         if (key.isBlank()) {
-            AlchemodInit.LOG.error("[Alchemod] OPENROUTER_API_KEY env var not set!");
-            return "ERROR:no_key";
+            AlchemodInit.LOG.error("[Forge] OPENROUTER_API_KEY not set.");
+            return ForgeResult.error("no_key");
         }
 
-        // Tight system prompt — model must reply with only a Minecraft item ID
-        String system = "You are a Minecraft alchemist oracle. "
-                + "Given two Minecraft items, respond with EXACTLY ONE vanilla Minecraft item ID "
-                + "that thematically represents their combination. "
-                + "Format: namespace:item_name — example: minecraft:blaze_rod. "
-                + "No explanation. No punctuation. Just the item ID.";
+        String system = """
+You are a Minecraft alchemist oracle. Given two input items, you transmute them into a result.
+Respond with ONLY valid JSON — no markdown fences, no explanation.
 
-        String user = "Combine: " + itemA + " + " + itemB;
+Required field:
+  "item_id": "namespace:item_name"   — a valid vanilla Minecraft item ID
 
-        // Use centralized OpenRouterClient instead of inline HTTP
+Optional enrichment fields (omit any you don't want):
+  "name":   "Custom display name"
+  "lore":   "One atmospheric flavour line"
+  "rarity": "common" | "uncommon" | "rare" | "epic" | "legendary"
+  "enchantments": [{"id":"minecraft:sharpness","level":2}, ...]
+
+Rules:
+- Always include item_id. It must exist in vanilla Minecraft 1.21.
+- Add enrichment only when it genuinely fits the combination's theme.
+- Common, mundane results (sticks from wood + wood) need no enrichment.
+- Rare, magical, or thematically interesting combos deserve a custom name,
+  lore, and possibly enchantments.
+- Enchantments must be valid for the output item type (no Sharpness on bows, etc.).
+- Max 2 enchantments. Max level: whatever vanilla allows (e.g. Sharpness V).
+- Rarity tiers: common (no colour), uncommon (green), rare (aqua), epic (purple), legendary (gold).
+- Keep names evocative and short (≤4 words). Keep lore atmospheric (≤12 words).
+""";
+
+        String user = "Transmute: " + itemA + " + " + itemB;
+
         OpenRouterClient.ChatResult result = OpenRouterClient.chat(
                 key,
                 new OpenRouterClient.ChatRequest(
                         AlchemodInit.CONFIG.forgeModel(),
-                        30,  // max_tokens
+                        200,
                         AlchemodInit.CONFIG.forgeTimeoutSeconds(),
                         system,
                         user));
 
         if (result.isError()) {
-            AlchemodInit.LOG.error("[Alchemod] API error: {}", result.error());
-            return "ERROR:" + result.error();
+            AlchemodInit.LOG.error("[Forge] API error: {}", result.error());
+            return ForgeResult.error(result.error());
         }
 
-        return parseItemId(result.content());
+        return parseForgeResult(result.content());
     }
 
-    // Extract item ID from response content (e.g. "minecraft:blaze_rod")
-    private String parseItemId(String content) {
-        // Extract first namespace:id token from the response
-        Pattern idMatch = Pattern.compile("([a-z][a-z0-9_]*:[a-z][a-z0-9_/]*)");
-        Matcher m = idMatch.matcher(content);
-        if (m.find()) {
-            return m.group(1);
+    // ── Parse JSON response ───────────────────────────────────────────────────
+
+    private ForgeResult parseForgeResult(String content) {
+        try {
+            String cleaned = stripCodeFence(content != null ? content.trim() : "");
+            String jsonBody = extractFirstJsonObject(cleaned);
+            if (jsonBody == null) {
+                // Fallback: look for a bare item id
+                return new ForgeResult(extractBareItemId(cleaned), null, null, null, List.of(), null);
+            }
+
+            JsonObject obj = JsonParser.parseString(jsonBody).getAsJsonObject();
+
+            String itemId = getString(obj, "item_id", null);
+            if (itemId == null) itemId = extractBareItemId(cleaned);
+            if (itemId == null) itemId = "minecraft:nether_star";
+
+            String name   = getNullable(obj, "name");
+            String lore   = getNullable(obj, "lore");
+            String rarity = normalise(getNullable(obj, "rarity"));
+            if (rarity != null && !List.of("common","uncommon","rare","epic","legendary").contains(rarity))
+                rarity = null;
+
+            List<EnchantSpec> enchants = new ArrayList<>();
+            if (obj.has("enchantments") && obj.get("enchantments").isJsonArray()) {
+                for (JsonElement el : obj.getAsJsonArray("enchantments")) {
+                    if (!el.isJsonObject()) continue;
+                    JsonObject e = el.getAsJsonObject();
+                    String id    = getString(e, "id", null);
+                    int    level = e.has("level") ? e.get("level").getAsInt() : 1;
+                    if (id != null) enchants.add(new EnchantSpec(id, Math.max(1, Math.min(level, 10))));
+                }
+            }
+
+            return new ForgeResult(itemId, name, lore, rarity, enchants, null);
+
+        } catch (JsonSyntaxException | IllegalStateException e) {
+            AlchemodInit.LOG.warn("[Forge] JSON parse failed: {}", e.getMessage());
+            return new ForgeResult("minecraft:nether_star", null, null, null, List.of(), null);
         }
-        return "minecraft:nether_star"; // safe fallback
     }
 
-    // ── Apply the result back on the server thread ────────────────────────────
-    private void applyResult(String resultId) {
+    private static String extractBareItemId(String content) {
+        Pattern p = Pattern.compile("([a-z][a-z0-9_]*:[a-z][a-z0-9_/]*)");
+        Matcher m = p.matcher(content);
+        return m.find() ? m.group(1) : null;
+    }
+
+    // ── Apply result on server thread ─────────────────────────────────────────
+
+    private void applyResult(ForgeResult result) {
         aiPending = false;
 
-        if (resultId.startsWith("ERROR:")) {
-            AlchemodInit.LOG.warn("[Alchemod] Error from AI: {}", resultId);
-            state = STATE_ERROR;
+        if (result.error() != null) {
+            AlchemodInit.LOG.warn("[Forge] Error from AI: {}", result.error());
+            state    = STATE_ERROR;
             progress = 0;
             markDirty();
             return;
         }
 
-        // Validate the item ID exists in the registry
-        Identifier id = Identifier.tryParse(resultId);
-        Item item = id != null ? Registries.ITEM.get(id) : null;
+        Identifier id   = Identifier.tryParse(result.itemId());
+        Item       item = id != null ? Registries.ITEM.get(id) : null;
         if (item == null || item == Items.AIR) {
-            AlchemodInit.LOG.warn("[Alchemod] Unknown item '{}', falling back to nether_star", resultId);
+            AlchemodInit.LOG.warn("[Forge] Unknown item '{}', falling back to nether_star", result.itemId());
             item = Items.NETHER_STAR;
         }
 
-        // Consume one of each input, place output
+        // Consume inputs
         items.get(SLOT_A).decrement(1);
         items.get(SLOT_B).decrement(1);
         if (items.get(SLOT_A).isEmpty()) items.set(SLOT_A, ItemStack.EMPTY);
         if (items.get(SLOT_B).isEmpty()) items.set(SLOT_B, ItemStack.EMPTY);
-        ItemStack output = new ItemStack(item);
-        applyNbtToStack(output);
-        items.set(SLOT_OUTPUT, output);
 
-        progress = MAX_PROGRESS; // fill bar to 100%
-        state = STATE_READY;
-        AlchemodInit.LOG.info("[Alchemod] Output: {}", Registries.ITEM.getId(item));
+        ItemStack output = new ItemStack(item);
+
+        // Apply AI-generated enrichment
+        applyAiEnrichment(output, result);
+
+        // Also apply any manual overrides the player set via the NBT panel
+        applyManualOverrides(output);
+
+        items.set(SLOT_OUTPUT, output);
+        lastResultName   = result.name()   != null ? result.name()   : "";
+        lastResultRarity = result.rarity() != null ? result.rarity() : "";
+        progress = MAX_PROGRESS;
+        state    = STATE_READY;
+        AlchemodInit.LOG.info("[Forge] Output: {} (name='{}', rarity='{}')",
+                Registries.ITEM.getId(item), lastResultName, lastResultRarity);
         markDirty();
     }
 
-    // Called by the output slot when the player takes the item
+    private void applyAiEnrichment(ItemStack stack, ForgeResult result) {
+        NbtCompound forgeTag = new NbtCompound();
+
+        if (result.name() != null && !result.name().isBlank()) {
+            Text nameText = applyRarityFormatting(result.name(), result.rarity());
+            stack.set(DataComponentTypes.CUSTOM_NAME, nameText);
+            forgeTag.putString("forge_name",   result.name());
+            forgeTag.putString("forge_rarity",  result.rarity() != null ? result.rarity() : "");
+        }
+
+        if (result.lore() != null && !result.lore().isBlank()) {
+            stack.set(DataComponentTypes.LORE,
+                    new LoreComponent(List.of(Text.literal("§7§o" + result.lore()))));
+            forgeTag.putString("forge_lore", result.lore());
+        }
+
+        if (!result.enchantments().isEmpty() && world != null) {
+            Registry<Enchantment> reg = world.getRegistryManager().getOrThrow(RegistryKeys.ENCHANTMENT);
+            ItemEnchantmentsComponent.Builder builder =
+                    new ItemEnchantmentsComponent.Builder(ItemEnchantmentsComponent.DEFAULT);
+            boolean added = false;
+            for (EnchantSpec spec : result.enchantments()) {
+                Identifier eid = Identifier.tryParse(spec.id());
+                if (eid == null) eid = Identifier.tryParse("minecraft:" + spec.id());
+                if (eid == null) continue;
+                var entry = reg.getEntry(eid);
+                if (entry.isPresent()) {
+                    builder.add(entry.get(), spec.level());
+                    added = true;
+                    AlchemodInit.LOG.info("[Forge] Applied enchantment {}×{}", eid, spec.level());
+                }
+            }
+            if (added) {
+                stack.set(DataComponentTypes.ENCHANTMENTS, builder.build());
+            }
+        }
+
+        if (!forgeTag.isEmpty()) {
+            NbtCompound root = new NbtCompound();
+            root.put("alchemod_forge", forgeTag);
+            stack.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(root));
+        }
+    }
+
+    private static Text applyRarityFormatting(String name, String rarity) {
+        String prefix = switch (rarity != null ? rarity : "") {
+            case "uncommon"  -> "§a";
+            case "rare"      -> "§b";
+            case "epic"      -> "§d";
+            case "legendary" -> "§6§l";
+            default          -> "§f";
+        };
+        return Text.literal(prefix + name);
+    }
+
+    private void applyManualOverrides(ItemStack stack) {
+        if (!customName.isBlank()) {
+            stack.set(DataComponentTypes.CUSTOM_NAME, Text.literal(customName));
+        }
+        if (!customLore.isBlank()) {
+            List<Text> lines = parseLoreLines(customLore);
+            if (!lines.isEmpty()) stack.set(DataComponentTypes.LORE, new LoreComponent(lines));
+        }
+        if (customColor != -1) {
+            stack.set(DataComponentTypes.DYED_COLOR, new DyedColorComponent(customColor, true));
+        }
+        if (!customEnchantments.isEmpty() && world != null) {
+            Registry<Enchantment> reg = world.getRegistryManager().getOrThrow(RegistryKeys.ENCHANTMENT);
+            ItemEnchantmentsComponent.Builder builder =
+                    new ItemEnchantmentsComponent.Builder(ItemEnchantmentsComponent.DEFAULT);
+            boolean any = false;
+            for (String spec : customEnchantments) {
+                ParsedEnchantment pe = parseEnchantment(spec);
+                if (pe == null) continue;
+                var entry = reg.getEntry(pe.id());
+                if (entry.isPresent()) { builder.add(entry.get(), pe.level()); any = true; }
+            }
+            if (any) stack.set(DataComponentTypes.ENCHANTMENTS, builder.build());
+        }
+        if (hideFlags != 0) {
+            stack.set(DataComponentTypes.HIDE_ADDITIONAL_TOOLTIP, Unit.INSTANCE);
+        }
+    }
+
+    // ── onOutputTaken ─────────────────────────────────────────────────────────
+
     public void onOutputTaken() {
-        // Reset to idle so it can run again
-        state = STATE_IDLE;
+        state    = STATE_IDLE;
         progress = 0;
         markDirty();
     }
 
+    // ── Accessors for GUI ─────────────────────────────────────────────────────
+
+    public String getLastResultName()   { return lastResultName; }
+    public String getLastResultRarity() { return lastResultRarity; }
+
     // ── NamedScreenHandlerFactory ─────────────────────────────────────────────
+
     @Override
     public ScreenHandler createMenu(int syncId, PlayerInventory playerInv, PlayerEntity player) {
         return new ForgeScreenHandler(syncId, playerInv, this, delegate);
@@ -226,7 +389,8 @@ public class ForgeBlockEntity extends BlockEntity
     }
 
     // ── Inventory ─────────────────────────────────────────────────────────────
-    @Override public int size() { return 3; }
+
+    @Override public int size()  { return 3; }
     @Override public boolean isEmpty() { return items.stream().allMatch(ItemStack::isEmpty); }
     @Override public ItemStack getStack(int slot) { return items.get(slot); }
     @Override public ItemStack removeStack(int slot, int amount) {
@@ -241,239 +405,156 @@ public class ForgeBlockEntity extends BlockEntity
     }
     @Override public void clear() { items.clear(); }
 
-    // Expose for the screen handler
-    public PropertyDelegate getDelegate() { return delegate; }
-    public int getMaxProgress() { return MAX_PROGRESS; }
+    public PropertyDelegate getDelegate()       { return delegate; }
+    public int getMaxProgress()                 { return MAX_PROGRESS; }
+    public DefaultedList<ItemStack> getItems()  { return items; }
 
-    public DefaultedList<ItemStack> getItems() { return items; }
-
-    // NBT getter/setter for custom properties
-    public String getCustomName() { return customName; }
-    public void setCustomName(String name) {
-        customName = sanitiseText(name);
-        markDirty();
-    }
-    public String getCustomLore() { return customLore; }
-    public void setCustomLore(String lore) {
-        customLore = sanitiseText(lore);
-        markDirty();
-    }
-    public int getCustomColor() { return customColor; }
-    public void setCustomColor(int color) {
-        customColor = sanitiseColor(color);
-        markDirty();
-    }
-    public List<String> getCustomEnchantments() { return customEnchantments; }
-    public void setCustomEnchantments(List<String> ench) {
-        customEnchantments = sanitiseEnchantments(ench);
-        markDirty();
-    }
-    public int getHideFlags() { return hideFlags; }
-    public void setHideFlags(int flags) {
-        hideFlags = Math.max(flags, 0);
-        markDirty();
-    }
-
-    public void applyCustomData(String name, String lore, int color, List<String> enchantments, int flags) {
-        customName = sanitiseText(name);
-        customLore = sanitiseText(lore);
-        customColor = sanitiseColor(color);
+    // Manual-override setters (called from ForgeNbtPayload handler)
+    public void applyCustomData(String name, String lore, int color,
+            List<String> enchantments, int flags) {
+        customName         = sanitiseText(name);
+        customLore         = sanitiseText(lore);
+        customColor        = sanitiseColor(color);
         customEnchantments = sanitiseEnchantments(enchantments);
-        hideFlags = Math.max(flags, 0);
+        hideFlags          = Math.max(flags, 0);
         markDirty();
     }
 
-    private void applyNbtToStack(ItemStack stack) {
-        NbtCompound tag = new NbtCompound();
-        NbtCompound forgeTag = new NbtCompound();
-        if (!customName.isBlank()) {
-            stack.set(DataComponentTypes.CUSTOM_NAME, Text.literal(customName));
-            forgeTag.putString("display_name", customName);
-        }
-        if (!customLore.isBlank()) {
-            List<Text> loreLines = parseLoreLines(customLore);
-            if (!loreLines.isEmpty()) {
-                stack.set(DataComponentTypes.LORE, new LoreComponent(loreLines));
-            }
-            forgeTag.putString("display_lore", customLore);
-        }
-        if (customColor != -1) {
-            stack.set(DataComponentTypes.DYED_COLOR, new DyedColorComponent(customColor, hideFlags == 0));
-            forgeTag.putInt("display_color", customColor);
-        }
-        if (!customEnchantments.isEmpty()) {
-            ItemEnchantmentsComponent enchantments = buildEnchantments();
-            if (enchantments != null && !enchantments.isEmpty()) {
-                if (hideFlags != 0) {
-                    enchantments = enchantments.withShowInTooltip(false);
-                }
-                stack.set(DataComponentTypes.ENCHANTMENTS, enchantments);
-            }
-            forgeTag.putString("enchantments", String.join(",", customEnchantments));
-        }
-        if (hideFlags != 0) {
-            stack.set(DataComponentTypes.HIDE_ADDITIONAL_TOOLTIP, Unit.INSTANCE);
-            forgeTag.putInt("hide_flags", hideFlags);
-        }
+    // ── NBT persistence ───────────────────────────────────────────────────────
 
-        if (!forgeTag.isEmpty()) {
-            tag.put("alchemod_forge", forgeTag);
-            stack.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(tag));
-        }
-    }
-
-    // ── NBT ───────────────────────────────────────────────────────────────────
     @Override
     protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
         super.writeNbt(nbt, lookup);
         Inventories.writeNbt(nbt, items, lookup);
-        nbt.putInt("State", state);
+        nbt.putInt("State",    state);
         nbt.putInt("Progress", progress);
-        nbt.putString("CustomName", customName);
-        nbt.putString("CustomLore", customLore);
-        nbt.putInt("CustomColor", customColor);
+        nbt.putString("LastName",   lastResultName);
+        nbt.putString("LastRarity", lastResultRarity);
+        // Manual overrides
+        nbt.putString("CustomName",         customName);
+        nbt.putString("CustomLore",         customLore);
+        nbt.putInt   ("CustomColor",        customColor);
         nbt.putString("CustomEnchantments", String.join(",", customEnchantments));
-        nbt.putInt("HideFlags", hideFlags);
+        nbt.putInt   ("HideFlags",          hideFlags);
     }
 
     @Override
     protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
         super.readNbt(nbt, lookup);
         Inventories.readNbt(nbt, items, lookup);
-        state    = nbt.getInt("State");
-        progress = nbt.getInt("Progress");
-        customName = nbt.getString("CustomName");
-        customLore = nbt.getString("CustomLore");
-        customColor = nbt.getInt("CustomColor");
-        String enchStr = nbt.getString("CustomEnchantments");
-        if (!enchStr.isBlank()) {
-            customEnchantments = new ArrayList<>(List.of(enchStr.split(",")));
-        } else {
-            customEnchantments = new ArrayList<>();
-        }
-        hideFlags = nbt.getInt("HideFlags");
-        // If it was mid-process when the world saved, reset so it retries
+        state           = nbt.getInt("State");
+        progress        = nbt.getInt("Progress");
+        lastResultName  = nbt.getString("LastName");
+        lastResultRarity= nbt.getString("LastRarity");
+        customName      = nbt.getString("CustomName");
+        customLore      = nbt.getString("CustomLore");
+        customColor     = nbt.getInt("CustomColor");
+        hideFlags       = nbt.getInt("HideFlags");
+        String enchStr  = nbt.getString("CustomEnchantments");
+        customEnchantments = enchStr.isBlank() ? new ArrayList<>()
+                : new ArrayList<>(List.of(enchStr.split(",")));
         if (state == STATE_PROCESSING) { state = STATE_IDLE; progress = 0; }
     }
 
-    // ── Util ──────────────────────────────────────────────────────────────────
     @Override
     public void markDirty() {
         super.markDirty();
-        if (world != null) {
+        if (world != null)
             world.updateListeners(pos, getCachedState(), getCachedState(), Block.NOTIFY_LISTENERS);
-        }
     }
 
-    private ItemEnchantmentsComponent buildEnchantments() {
-        if (world == null || customEnchantments.isEmpty()) {
-            return null;
-        }
+    // ── JSON helpers ──────────────────────────────────────────────────────────
 
-        Registry<Enchantment> registry = world.getRegistryManager().getOrThrow(RegistryKeys.ENCHANTMENT);
-        ItemEnchantmentsComponent.Builder builder = new ItemEnchantmentsComponent.Builder(ItemEnchantmentsComponent.DEFAULT);
-        boolean addedAny = false;
-
-        for (String spec : customEnchantments) {
-            ParsedEnchantment parsed = parseEnchantment(spec);
-            if (parsed == null) {
-                continue;
-            }
-
-            java.util.Optional<RegistryEntry.Reference<Enchantment>> entry = registry.getEntry(parsed.id());
-            if (entry.isPresent()) {
-                builder.add(entry.get(), parsed.level());
-                addedAny = true;
-            } else {
-                AlchemodInit.LOG.warn("[Alchemod] Unknown enchantment '{}'", parsed.id());
-            }
-        }
-
-        return addedAny ? builder.build() : null;
+    private static String stripCodeFence(String s) {
+        if (!s.startsWith("```")) return s;
+        int nl   = s.indexOf('\n');
+        int last = s.lastIndexOf("```");
+        return (nl < 0 || last <= nl) ? s.replace("```","").trim()
+                                      : s.substring(nl + 1, last).trim();
     }
+
+    private static String extractFirstJsonObject(String content) {
+        int start = -1, depth = 0;
+        boolean inStr = false, esc = false;
+        for (int i = 0; i < content.length(); i++) {
+            char c = content.charAt(i);
+            if (esc)        { esc = false; continue; }
+            if (c == '\\')  { esc = true;  continue; }
+            if (c == '"')   { inStr = !inStr; continue; }
+            if (inStr)      continue;
+            if (c == '{')   { if (depth++ == 0) start = i; }
+            else if (c == '}') { if (--depth == 0 && start >= 0) return content.substring(start, i + 1); }
+        }
+        return null;
+    }
+
+    private static String getString(JsonObject o, String key, String fallback) {
+        JsonElement el = o.get(key);
+        return (el == null || el.isJsonNull()) ? fallback : el.getAsString().trim();
+    }
+
+    private static String getNullable(JsonObject o, String key) {
+        JsonElement el = o.get(key);
+        if (el == null || el.isJsonNull()) return null;
+        String v = el.getAsString().trim();
+        return v.isBlank() || "null".equalsIgnoreCase(v) ? null : v;
+    }
+
+    private static String normalise(String v) {
+        return v == null ? null : v.toLowerCase().replace("minecraft:","").trim();
+    }
+
+    // ── Enchantment / lore helpers ────────────────────────────────────────────
 
     private static ParsedEnchantment parseEnchantment(String spec) {
-        if (spec == null || spec.isBlank()) {
-            return null;
-        }
-
+        if (spec == null || spec.isBlank()) return null;
         String trimmed = spec.trim();
         int level = 1;
         String idPart = trimmed;
-
-        int atIndex = trimmed.lastIndexOf('@');
-        if (atIndex > 0 && atIndex < trimmed.length() - 1) {
-            idPart = trimmed.substring(0, atIndex).trim();
-            level = parsePositiveInt(trimmed.substring(atIndex + 1).trim(), 1);
+        int at = trimmed.lastIndexOf('@');
+        if (at > 0) {
+            idPart = trimmed.substring(0, at).trim();
+            try { level = Integer.parseInt(trimmed.substring(at + 1).trim()); } catch (NumberFormatException ignored) {}
         } else {
             String[] parts = trimmed.split("\\s+");
             if (parts.length >= 2 && parts[parts.length - 1].chars().allMatch(Character::isDigit)) {
-                level = parsePositiveInt(parts[parts.length - 1], 1);
+                try { level = Integer.parseInt(parts[parts.length - 1]); } catch (NumberFormatException ignored) {}
                 idPart = String.join(" ", java.util.Arrays.copyOf(parts, parts.length - 1)).trim();
             }
         }
-
         Identifier id = Identifier.tryParse(idPart);
-        if (id == null) {
-            id = Identifier.tryParse("minecraft:" + idPart);
-        }
-        if (id == null) {
-            return null;
-        }
-
-        return new ParsedEnchantment(id, Math.max(1, level));
+        if (id == null) id = Identifier.tryParse("minecraft:" + idPart);
+        return id != null ? new ParsedEnchantment(id, Math.max(1, level)) : null;
     }
 
     private static List<Text> parseLoreLines(String lore) {
         List<Text> lines = new ArrayList<>();
-        String[] splitLines = lore.replace("\\n", "|").split("\\|");
-        for (String line : splitLines) {
-            String trimmed = line.trim();
-            if (!trimmed.isBlank()) {
-                lines.add(Text.literal(trimmed));
-            }
+        for (String line : lore.replace("\\n","|").split("\\|")) {
+            String t = line.trim();
+            if (!t.isBlank()) lines.add(Text.literal(t));
         }
         return lines;
     }
 
-    private static String sanitiseText(String value) {
-        return value == null ? "" : value.trim();
+    private static String sanitiseText(String v) { return v == null ? "" : v.trim(); }
+    private static int sanitiseColor(int v) { return v < 0 ? -1 : v & 0xFFFFFF; }
+    private static List<String> sanitiseEnchantments(List<String> list) {
+        List<String> out = new ArrayList<>();
+        if (list == null) return out;
+        for (String s : list) { if (s != null && !s.trim().isBlank()) out.add(s.trim()); }
+        return out;
     }
 
-    private static int sanitiseColor(int value) {
-        return value < 0 ? -1 : value & 0xFFFFFF;
-    }
+    // ── Inner records ─────────────────────────────────────────────────────────
 
-    private static List<String> sanitiseEnchantments(List<String> enchantments) {
-        List<String> clean = new ArrayList<>();
-        if (enchantments == null) {
-            return clean;
-        }
-
-        for (String enchantment : enchantments) {
-            if (enchantment != null) {
-                String trimmed = enchantment.trim();
-                if (!trimmed.isBlank()) {
-                    clean.add(trimmed);
-                }
-            }
-        }
-        return clean;
-    }
-
-    private static int parsePositiveInt(String value, int fallback) {
-        try {
-            return Integer.parseInt(value);
-        } catch (NumberFormatException ignored) {
-            return fallback;
+    private record ForgeResult(
+            String itemId, String name, String lore, String rarity,
+            List<EnchantSpec> enchantments, String error) {
+        static ForgeResult error(String msg) {
+            return new ForgeResult("minecraft:nether_star", null, null, null, List.of(), msg);
         }
     }
 
-    private static String quoted(String s) {
-        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"")
-                        .replace("\n", "\\n").replace("\r", "") + "\"";
-    }
-
-    private record ParsedEnchantment(Identifier id, int level) {
-    }
+    private record EnchantSpec(String id, int level) {}
+    private record ParsedEnchantment(Identifier id, int level) {}
 }
