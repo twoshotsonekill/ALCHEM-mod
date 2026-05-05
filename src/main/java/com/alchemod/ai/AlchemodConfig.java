@@ -15,17 +15,20 @@ public record AlchemodConfig(
         String builderModel,
         String creatorModel,
         String forgeModel,
+        String infuserModel,
         int builderMaxTokens,
         int creatorMaxTokensScripted,
         int creatorMaxTokensPlain,
         int builderTimeoutSeconds,
         int creatorTimeoutSeconds,
-        int forgeTimeoutSeconds
+        int forgeTimeoutSeconds,
+        int infuserTimeoutSeconds
 ) {
 
     public static final String DEFAULT_BUILDER_MODEL = "openai/gpt-5.4-mini";
     public static final String DEFAULT_CREATOR_MODEL = "google/gemini-2.5-flash-lite-preview-05-20";
     public static final String DEFAULT_FORGE_MODEL = "openai/gpt-4o-mini";
+    public static final String DEFAULT_INFUSER_MODEL = "google/gemini-2.5-flash-lite-preview-05-20";
     public static final int DEFAULT_BUILDER_MAX_TOKENS = 3500;
     public static final int DEFAULT_CREATOR_MAX_TOKENS_SCRIPTED = 1200;
     public static final int DEFAULT_CREATOR_MAX_TOKENS_PLAIN = 400;
@@ -37,8 +40,20 @@ public record AlchemodConfig(
         return forgeModel;
     }
 
-    public int forgeTimeoutSeconds() {
-        return forgeTimeoutSeconds;
+    public String infuserModel() {
+        return infuserModel;
+    }
+
+    public String transmuterModel() {
+        return "openai/gpt-4o-mini"; // default
+    }
+
+    public int infuserTimeoutSeconds() {
+        return infuserTimeoutSeconds;
+    }
+
+    public int transmuterTimeoutSeconds() {
+        return 15; // default
     }
 
     public static AlchemodConfig load(Path configPath, Logger logger) {
@@ -71,12 +86,14 @@ public record AlchemodConfig(
                 stringProperty(properties, "builder_model", DEFAULT_BUILDER_MODEL),
                 stringProperty(properties, "creator_model", DEFAULT_CREATOR_MODEL),
                 stringProperty(properties, "forge_model", DEFAULT_FORGE_MODEL),
+                stringProperty(properties, "infuser_model", DEFAULT_INFUSER_MODEL),
                 intProperty(properties, "builder_max_tokens", DEFAULT_BUILDER_MAX_TOKENS, logger),
                 intProperty(properties, "creator_max_tokens_scripted", DEFAULT_CREATOR_MAX_TOKENS_SCRIPTED, logger),
                 intProperty(properties, "creator_max_tokens_plain", DEFAULT_CREATOR_MAX_TOKENS_PLAIN, logger),
                 intProperty(properties, "builder_timeout_seconds", DEFAULT_BUILDER_TIMEOUT_SECONDS, logger),
                 intProperty(properties, "creator_timeout_seconds", DEFAULT_CREATOR_TIMEOUT_SECONDS, logger),
-                intProperty(properties, "forge_timeout_seconds", DEFAULT_FORGE_TIMEOUT_SECONDS, logger));
+                intProperty(properties, "forge_timeout_seconds", DEFAULT_FORGE_TIMEOUT_SECONDS, logger),
+                intProperty(properties, "infuser_timeout_seconds", 40, logger));
     }
 
     private static String stringProperty(Properties properties, String key, String fallback) {
@@ -123,22 +140,26 @@ public record AlchemodConfig(
                 builder_model=%s
                 creator_model=%s
                 forge_model=%s
+                infuser_model=%s
                 builder_max_tokens=%d
                 creator_max_tokens_scripted=%d
                 creator_max_tokens_plain=%d
                 builder_timeout_seconds=%d
                 creator_timeout_seconds=%d
                 forge_timeout_seconds=%d
+                infuser_timeout_seconds=%d
                 """.formatted(
                 DEFAULT_BUILDER_MODEL,
                 DEFAULT_CREATOR_MODEL,
                 DEFAULT_FORGE_MODEL,
+                DEFAULT_INFUSER_MODEL,
                 DEFAULT_BUILDER_MAX_TOKENS,
                 DEFAULT_CREATOR_MAX_TOKENS_SCRIPTED,
                 DEFAULT_CREATOR_MAX_TOKENS_PLAIN,
                 DEFAULT_BUILDER_TIMEOUT_SECONDS,
                 DEFAULT_CREATOR_TIMEOUT_SECONDS,
-                DEFAULT_FORGE_TIMEOUT_SECONDS);
+                DEFAULT_FORGE_TIMEOUT_SECONDS,
+                40);
 
         try (OutputStream out = Files.newOutputStream(path)) {
             out.write(template.getBytes(StandardCharsets.UTF_8));

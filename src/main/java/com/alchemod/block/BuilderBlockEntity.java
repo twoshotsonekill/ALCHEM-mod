@@ -68,6 +68,10 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
     private long lastPromptTime = 0;
     private static final long COOLDOWN_MS = 30_000;  // 30 seconds
 
+    // Auto-reset timer for STATE_COMPLETE
+    private static final long AUTO_RESET_DELAY_MS = 3_000;  // 3 seconds
+    private long completedTime = 0;
+
     private final PropertyDelegate delegate = new PropertyDelegate() {
         @Override
         public int get(int index) {
@@ -136,7 +140,7 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
 
         // Auto-reset STATE_COMPLETE after 3 seconds
         if (state == STATE_COMPLETE && completedTime > 0) {
-            if (System.currentTimeMillis() - completedTime > 3000) {
+            if (System.currentTimeMillis() - completedTime > AUTO_RESET_DELAY_MS) {
                 state = STATE_IDLE;
                 progress = 0;
                 completedTime = 0;
@@ -144,8 +148,6 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
             }
         }
     }
-
-    private long completedTime = 0;
 
 @Override
     protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {

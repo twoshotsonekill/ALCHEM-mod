@@ -3,6 +3,7 @@ package com.alchemod;
 import com.alchemod.screen.BuilderScreen;
 import com.alchemod.screen.CreatorScreen;
 import com.alchemod.screen.ForgeScreen;
+import com.alchemod.screen.InfuserScreen;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -18,6 +19,7 @@ public class AlchemodClient implements ClientModInitializer {
         HandledScreens.register(AlchemodInit.FORGE_HANDLER, ForgeScreen::new);
         HandledScreens.register(AlchemodInit.CREATOR_HANDLER, CreatorScreen::new);
         HandledScreens.register(AlchemodInit.BUILDER_HANDLER, BuilderScreen::new);
+        HandledScreens.register(AlchemodInit.INFUSER_HANDLER, InfuserScreen::new);
 
         // Transparent blocks need their render layer declared client-side.
         BlockRenderLayerMap.INSTANCE.putBlock(

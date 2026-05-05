@@ -18,16 +18,15 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import org.jetbrains.annotations.Nullable;
 
-public class ForgeBlock extends Block implements BlockEntityProvider {
+public class TransmuterBlock extends Block implements BlockEntityProvider {
 
-    public ForgeBlock(AbstractBlock.Settings settings) { super(settings); }
+    public TransmuterBlock(AbstractBlock.Settings settings) { super(settings); }
 
     @Override
     public BlockEntity createBlockEntity(BlockPos pos, BlockState state) {
-        return new ForgeBlockEntity(pos, state);
+        return new TransmuterBlockEntity(pos, state);
     }
 
-    // Block base class returns MODEL already; kept for clarity.
     @Override
     public BlockRenderType getRenderType(BlockState state) {
         return BlockRenderType.MODEL;
@@ -41,10 +40,8 @@ public class ForgeBlock extends Block implements BlockEntityProvider {
 
     @Override
     protected ActionResult onUse(BlockState state, World world, BlockPos pos,
-            PlayerEntity player, BlockHitResult hit) {
+                                  PlayerEntity player, BlockHitResult hit) {
         if (!world.isClient) {
-            // Directly grab the block entity — avoids relying on Block.createScreenHandlerFactory
-            // which returns null in the base class and would silently swallow the open call.
             BlockEntity be = world.getBlockEntity(pos);
             if (be instanceof NamedScreenHandlerFactory factory) {
                 player.openHandledScreen(factory);
@@ -58,20 +55,19 @@ public class ForgeBlock extends Block implements BlockEntityProvider {
     public <T extends BlockEntity> BlockEntityTicker<T> getTicker(
             World world, BlockState state, BlockEntityType<T> type) {
         if (world.isClient) return null;
-        if (type == AlchemodInit.FORGE_BE_TYPE) {
-            return (BlockEntityTicker<T>) (w, pos, s, be) ->
-                    ((ForgeBlockEntity) be).serverTick(w, pos);
+        if (type == AlchemodInit.TRANS_MUTER_BE_TYPE) {
+            return (w, p, s, be) -> ((TransmuterBlockEntity) be).serverTick(w, p);
         }
         return null;
     }
 
     @Override
     public void onStateReplaced(BlockState state, World world, BlockPos pos,
-            BlockState newState, boolean moved) {
+                                 BlockState newState, boolean moved) {
         if (!state.isOf(newState.getBlock())) {
             BlockEntity be = world.getBlockEntity(pos);
-            if (be instanceof ForgeBlockEntity forge) {
-                ItemScatterer.spawn(world, pos, forge);
+            if (be instanceof TransmuterBlockEntity transmuter) {
+                ItemScatterer.spawn(world, pos, transmuter);
             }
         }
         super.onStateReplaced(state, world, pos, newState, moved);

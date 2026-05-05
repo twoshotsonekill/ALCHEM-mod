@@ -11,16 +11,25 @@ import com.alchemod.block.EtherCrystalBlock;
 import com.alchemod.block.ForgeBlock;
 import com.alchemod.block.ForgeBlockEntity;
 import com.alchemod.block.GlowStoneBricksBlock;
+import com.alchemod.block.InfuserBlock;
+import com.alchemod.block.InfuserBlockEntity;
 import com.alchemod.block.ReinforcedObsidianBlock;
+import com.alchemod.block.TransmuterBlock;
+import com.alchemod.block.TransmuterBlockEntity;
 import com.alchemod.block.VoidStoneBlock;
 import com.alchemod.creator.DynamicItemRegistry;
 import com.alchemod.event.ItemAbilityEvents;
+import com.alchemod.item.AlchemicalArmorItem;
+import com.alchemod.item.AlchemicalEssenceItem;
+import com.alchemod.item.AlchemicalWandItem;
 import com.alchemod.item.OddityItem;
 import com.alchemod.network.BuilderPromptPayload;
 import com.alchemod.network.ForgeNbtPayload;
 import com.alchemod.screen.BuilderScreenHandler;
 import com.alchemod.screen.CreatorScreenHandler;
 import com.alchemod.screen.ForgeScreenHandler;
+import com.alchemod.screen.InfuserScreenHandler;
+import com.alchemod.screen.TransmuterScreenHandler;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.itemgroup.v1.ItemGroupEvents;
 import net.fabricmc.fabric.api.object.builder.v1.block.entity.FabricBlockEntityTypeBuilder;
@@ -72,12 +81,19 @@ public class AlchemodInit implements ModInitializer {
     public static Block ETHER_CRYSTAL_BLOCK;
     public static Item ETHER_CRYSTAL_ITEM;
 
+    // Currency item
+    public static Item ESSENCE_ITEM;
+
     public static BlockEntityType<ForgeBlockEntity> FORGE_BE_TYPE;
     public static BlockEntityType<CreatorBlockEntity> CREATOR_BE_TYPE;
     public static BlockEntityType<BuilderBlockEntity> BUILDER_BE_TYPE;
+    public static BlockEntityType<InfuserBlockEntity> INFUSER_BE_TYPE;
     public static ScreenHandlerType<ForgeScreenHandler> FORGE_HANDLER;
     public static ScreenHandlerType<CreatorScreenHandler> CREATOR_HANDLER;
     public static ScreenHandlerType<BuilderScreenHandler> BUILDER_HANDLER;
+    public static ScreenHandlerType<InfuserScreenHandler> INFUSER_HANDLER;
+    public static BlockEntityType<TransmuterBlockEntity> TRANS_MUTER_BE_TYPE;
+    public static ScreenHandlerType<TransmuterScreenHandler> TRANS_MUTER_HANDLER;
 
     @Override
     public void onInitialize() {
@@ -201,10 +217,13 @@ public class AlchemodInit implements ModInitializer {
                 new BlockItem(ETHER_CRYSTAL_BLOCK, new Item.Settings()
                         .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "ether_crystal")))));
 
-        // BUG FIX: OddityItem was never registered in the Minecraft item registry, and
-        // DynamicItemRegistry.registerOddity() was never called. This meant ODDITY_ITEM
-        // was always null, so CreatorBlockEntity.applyResult() always fell through to the
-        // legacy 64-slot pool. After 64 crafts, players received nothing.
+        // Alchemical Essence - primary currency item
+        ESSENCE_ITEM = Registry.register(
+                Registries.ITEM, Identifier.of(MOD_ID, "alchemical_essence"),
+                new AlchemicalEssenceItem(new Item.Settings()
+                        .maxCount(64)
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "alchemical_essence")))));
+
         OddityItem oddityItem = Registry.register(
                 Registries.ITEM, Identifier.of(MOD_ID, "oddity"),
                 new OddityItem(new Item.Settings()
@@ -214,6 +233,35 @@ public class AlchemodInit implements ModInitializer {
 
         DynamicItemRegistry.register();
         ItemAbilityEvents.register();
+
+        // Alchemical Wand
+        Item WAND_ITEM = Registry.register(
+                Registries.ITEM, Identifier.of(MOD_ID, "alchemical_wand"),
+                new AlchemicalWandItem(new Item.Settings()
+                        .maxCount(1)
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "alchemical_wand")))));
+
+        // Alchemical Armor Set
+        Item HELMET_ITEM = Registry.register(
+                Registries.ITEM, Identifier.of(MOD_ID, "alchemical_helmet"),
+                new AlchemicalArmorItem(net.minecraft.entity.EquipmentSlot.HEAD, new Item.Settings()
+                        .maxCount(1)
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "alchemical_helmet")))));
+        Item CHESTPLATE_ITEM = Registry.register(
+                Registries.ITEM, Identifier.of(MOD_ID, "alchemical_chestplate"),
+                new AlchemicalArmorItem(net.minecraft.entity.EquipmentSlot.CHEST, new Item.Settings()
+                        .maxCount(1)
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "alchemical_chestplate")))));
+        Item LEGGINGS_ITEM = Registry.register(
+                Registries.ITEM, Identifier.of(MOD_ID, "alchemical_leggings"),
+                new AlchemicalArmorItem(net.minecraft.entity.EquipmentSlot.LEGS, new Item.Settings()
+                        .maxCount(1)
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "alchemical_leggings")))));
+        Item BOOTS_ITEM = Registry.register(
+                Registries.ITEM, Identifier.of(MOD_ID, "alchemical_boots"),
+                new AlchemicalArmorItem(net.minecraft.entity.EquipmentSlot.FEET, new Item.Settings()
+                        .maxCount(1)
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "alchemical_boots")))));
 
         FORGE_BE_TYPE = Registry.register(Registries.BLOCK_ENTITY_TYPE,
                 Identifier.of(MOD_ID, "alchemical_forge"),
@@ -227,6 +275,40 @@ public class AlchemodInit implements ModInitializer {
                 Identifier.of(MOD_ID, "build_creator"),
                 FabricBlockEntityTypeBuilder.create(BuilderBlockEntity::new, BUILDER_BLOCK).build());
 
+        // Alchemical Infuser Block
+        Block INFUSER_BLOCK = Registry.register(
+                Registries.BLOCK, Identifier.of(MOD_ID, "alchemical_infuser"),
+                new InfuserBlock(AbstractBlock.Settings.create()
+                        .registryKey(RegistryKey.of(RegistryKeys.BLOCK, Identifier.of(MOD_ID, "alchemical_infuser")))
+                        .mapColor(MapColor.PURPLE).strength(4f, 8f).requiresTool()
+                        .sounds(BlockSoundGroup.METAL).luminance(s -> 4)));
+
+        Item INFUSER_ITEM = Registry.register(
+                Registries.ITEM, Identifier.of(MOD_ID, "alchemical_infuser"),
+                new BlockItem(INFUSER_BLOCK, new Item.Settings()
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "alchemical_infuser")))));
+
+        INFUSER_BE_TYPE = Registry.register(Registries.BLOCK_ENTITY_TYPE,
+                Identifier.of(MOD_ID, "alchemical_infuser"),
+                FabricBlockEntityTypeBuilder.create(InfuserBlockEntity::new, INFUSER_BLOCK).build());
+
+        // Alchemical Transmuter Block
+        Block TRANS_MUTER_BLOCK = Registry.register(
+                Registries.BLOCK, Identifier.of(MOD_ID, "alchemical_transmuter"),
+                new TransmuterBlock(AbstractBlock.Settings.create()
+                        .registryKey(RegistryKey.of(RegistryKeys.BLOCK, Identifier.of(MOD_ID, "alchemical_transmuter")))
+                        .mapColor(MapColor.ORANGE).strength(4f, 8f).requiresTool()
+                        .sounds(BlockSoundGroup.METAL).luminance(s -> 3)));
+
+        Item TRANS_MUTER_ITEM = Registry.register(
+                Registries.ITEM, Identifier.of(MOD_ID, "alchemical_transmuter"),
+                new BlockItem(TRANS_MUTER_BLOCK, new Item.Settings()
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "alchemical_transmuter")))));
+
+        TRANS_MUTER_BE_TYPE = Registry.register(Registries.BLOCK_ENTITY_TYPE,
+                Identifier.of(MOD_ID, "alchemical_transmuter"),
+                FabricBlockEntityTypeBuilder.create(TransmuterBlockEntity::new, TRANS_MUTER_BLOCK).build());
+
         FORGE_HANDLER = Registry.register(Registries.SCREEN_HANDLER,
                 Identifier.of(MOD_ID, "alchemical_forge"),
                 new ScreenHandlerType<>(ForgeScreenHandler::new, FeatureSet.empty()));
@@ -238,6 +320,10 @@ public class AlchemodInit implements ModInitializer {
         BUILDER_HANDLER = Registry.register(Registries.SCREEN_HANDLER,
                 Identifier.of(MOD_ID, "build_creator"),
                 new ScreenHandlerType<>(BuilderScreenHandler::new, FeatureSet.empty()));
+
+        INFUSER_HANDLER = Registry.register(Registries.SCREEN_HANDLER,
+                Identifier.of(MOD_ID, "alchemical_infuser"),
+                new ScreenHandlerType<>(InfuserScreenHandler::new, FeatureSet.empty()));
 
         net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playC2S().register(
                 BuilderPromptPayload.ID, BuilderPromptPayload.CODEC);
@@ -291,6 +377,8 @@ public class AlchemodInit implements ModInitializer {
             entries.add(FORGE_ITEM);
             entries.add(CREATOR_ITEM);
             entries.add(BUILDER_ITEM);
+            entries.add(INFUSER_ITEM);
+            entries.add(ESSENCE_ITEM);
             entries.add(ALCHEMICAL_GLASS_ITEM);
             entries.add(REINFORCED_OBSIDIAN_ITEM);
             entries.add(GLOWSTONE_BRICKS_ITEM);

@@ -105,7 +105,7 @@ public class DynamicItem extends Item {
     // ── Tooltip ───────────────────────────────────────────────────────────────
 
     @Override
-    public void appendTooltip(ItemStack stack, TooltipContext context,
+    public void appendTooltip(ItemStack stack, Item.TooltipContext context,
             List<Text> tooltip, TooltipType type) {
 
         String description = readTag(stack, "creator_desc");

@@ -146,8 +146,6 @@ public final class BuilderRuntime {
     }
 
     private static void executeScript(String code, int seed, PlacementController controller) {
-        // BUG FIX: cleanAiCode() was computed but the original `code` was passed to
-        // evaluateString instead of `cleaned`, making the whole sanitisation step a no-op.
         String cleaned = cleanAiCode(code);
 
         Context context = FACTORY.enterContext();
@@ -247,7 +245,6 @@ public final class BuilderRuntime {
                 return Undefined.instance;
             }));
 
-            // BUG FIX: was `code` — now correctly passes the sanitised string
             context.evaluateString(scope, cleaned, "builder_program", 1, null);
         } catch (RhinoException e) {
             throw new IllegalArgumentException("Builder script runtime error: " + e.getLocalizedMessage(), e);

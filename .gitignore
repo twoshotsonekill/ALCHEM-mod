@@ -15,3 +15,7 @@ bin/
 # OS
 .DS_Store
 Thumbs.db
+
+# Minecraft/Fabric
+run/
+loom-cache/

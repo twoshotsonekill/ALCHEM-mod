@@ -105,7 +105,7 @@ public class OddityItem extends Item {
     // ── Tooltip ───────────────────────────────────────────────────────────────
 
     @Override
-    public void appendTooltip(ItemStack stack, TooltipContext context,
+    public void appendTooltip(ItemStack stack, Item.TooltipContext context,
             List<Text> tooltip, TooltipType type) {
         NbtCompound tag = getCustomData(stack);
         if (tag == null) return;

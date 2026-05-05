@@ -51,6 +51,45 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
 
     private static final int MAX_PROGRESS = 100;
 
+    // Effect durations by rarity (in ticks)
+    private static final int COMMON_EFFECT_DURATION = 180;
+    private static final int UNCOMMON_EFFECT_DURATION = 240;
+    private static final int RARE_EFFECT_DURATION = 320;
+    private static final int EPIC_EFFECT_DURATION = 420;
+    private static final int LEGENDARY_EFFECT_DURATION = 520;
+
+    // Effect amplifiers by rarity
+    private static final int COMMON_EFFECT_AMPLIFIER = 0;
+    private static final int RARE_EFFECT_AMPLIFIER = 1;
+    private static final int EPIC_EFFECT_AMPLIFIER = 2;
+    private static final int LEGENDARY_EFFECT_AMPLIFIER = 2;
+
+    // Explosion powers
+    private static final float BOW_EXPLOSION_POWER_COMMON = 2.0f;
+    private static final float BOW_EXPLOSION_POWER_HIGH = 3.0f;
+    private static final float THROWABLE_EXPLOSION_POWER = 1.6f;
+
+    // Heal amounts
+    private static final int FOOD_HEAL_COMMON = 3;
+    private static final int FOOD_HEAL_HIGH = 6;
+
+    // Special ability parameters
+    private static final int IGNITE_DURATION = 6;
+    private static final float KNOCKBACK_STRENGTH = 3.0f;
+    private static final int FREEZE_DURATION = 180;
+    private static final int FREEZE_AMPLIFIER = 2;
+    private static final int DRAIN_DAMAGE = 5;
+    private static final int DRAIN_HEAL = 4;
+    private static final int INVISIBILITY_DURATION = 160;
+    private static final int LIGHTNING_RADIUS = 8;
+    private static final int VOID_STEP_SLOW_FALLING_DURATION = 200;
+    private static final double VOID_STEP_LAUNCH_VELOCITY = 0.8;
+
+    // Absorption parameters
+    private static final int ABSORPTION_DURATION = 240;
+    private static final int ABSORPTION_AMPLIFIER_COMMON = 0;
+    private static final int ABSORPTION_AMPLIFIER_HIGH = 1;
+
     private static final Set<String> VALID_EFFECTS = Set.of(
             "speed", "strength", "regeneration", "resistance",
             "fire_resistance", "night_vision", "absorption", "luck",

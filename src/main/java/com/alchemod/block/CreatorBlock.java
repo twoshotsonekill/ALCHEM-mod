@@ -33,12 +33,6 @@ public class CreatorBlock extends Block implements BlockEntityProvider {
         return BlockRenderType.MODEL;
     }
 
-    /**
-     * BUG FIX: Block.createScreenHandlerFactory() returns null by default.
-     * We must override it to return the block entity (which implements
-     * NamedScreenHandlerFactory). Without this, state.createScreenHandlerFactory()
-     * always returns null and the GUI never opens.
-     */
     @Override
     public NamedScreenHandlerFactory createScreenHandlerFactory(BlockState state, World world, BlockPos pos) {
         BlockEntity be = world.getBlockEntity(pos);

@@ -66,10 +66,6 @@ public class ForgeScreenHandler extends ScreenHandler {
             }
             if (original.isEmpty()) {
                 slot.setStack(ItemStack.EMPTY);
-                // BUG FIX: quickMove bypasses Slot.onTakeItem, so onOutputTaken()
-                // was never called when the player shift-clicked the output slot.
-                // The state stayed permanently stuck at STATE_READY.
-                // Fix: detect the output slot and call the reset callback explicitly.
                 if (index == ForgeBlockEntity.SLOT_OUTPUT && inv instanceof ForgeBlockEntity be) {
                     be.onOutputTaken();
                 }

@@ -155,10 +155,6 @@ public class ForgeScreen extends HandledScreen<ForgeScreenHandler> {
                         .filter(value -> !value.isBlank())
                         .toList();
 
-        // BUG FIX: was BlockPos.ORIGIN — the server handler validates that the player is
-        // within 64 blocks of the block pos in the packet, so sending ORIGIN caused every
-        // Apply click to be silently dropped unless the player happened to be standing at
-        // world origin. Now we read the actual pos from the ForgeBlockEntity.
         BlockPos blockPos = BlockPos.ORIGIN;
         Inventory inv = handler.getInventory();
         if (inv instanceof ForgeBlockEntity forge) {
