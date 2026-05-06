@@ -9,7 +9,6 @@ import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.render.RenderLayer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.inventory.Inventory;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
@@ -23,8 +22,8 @@ public class ForgeScreen extends HandledScreen<ForgeScreenHandler> {
     private TextFieldWidget loreField;
     private TextFieldWidget enchantField;
     private TextFieldWidget colorField;
-    private ButtonWidget applyButton;
-    private ButtonWidget nbtToggleButton;
+    private ButtonWidget   applyButton;
+    private ButtonWidget   nbtToggleButton;
     private boolean nbtVisible = false;
 
     public ForgeScreen(ForgeScreenHandler handler, PlayerInventory inv, Text title) {
@@ -47,11 +46,11 @@ public class ForgeScreen extends HandledScreen<ForgeScreenHandler> {
         int fieldWidth = 156;
         int startY = y + 85;
 
-        nameField = new TextFieldWidget(textRenderer, x + 10, startY, fieldWidth, 16, Text.literal("Name"));
+        nameField = new TextFieldWidget(textRenderer, x + 10, startY,         fieldWidth, 16, Text.literal("Name"));
         nameField.setMaxLength(50);
         nameField.setPlaceholder(Text.literal("Custom Name (optional)"));
 
-        loreField = new TextFieldWidget(textRenderer, x + 10, startY + 20, fieldWidth, 16, Text.literal("Lore"));
+        loreField = new TextFieldWidget(textRenderer, x + 10, startY + 20,    fieldWidth, 16, Text.literal("Lore"));
         loreField.setMaxLength(100);
         loreField.setPlaceholder(Text.literal("Lore line (optional)"));
 
@@ -59,13 +58,13 @@ public class ForgeScreen extends HandledScreen<ForgeScreenHandler> {
         enchantField.setMaxLength(60);
         enchantField.setPlaceholder(Text.literal("sharpness 3, fire_aspect 2"));
 
-        colorField = new TextFieldWidget(textRenderer, x + 115, startY + 40, 51, 16, Text.literal("Color"));
+        colorField = new TextFieldWidget(textRenderer, x + 115, startY + 40,  51, 16, Text.literal("Color"));
         colorField.setMaxLength(6);
         colorField.setPlaceholder(Text.literal("hex"));
 
-        applyButton = ButtonWidget.builder(Text.literal("Apply"), btn -> {
-            applyNbtToBlockEntity();
-        }).dimensions(x + 10, startY + 62, 60, 16).build();
+        applyButton = ButtonWidget.builder(Text.literal("Apply"),
+                btn -> applyNbtToBlockEntity()
+        ).dimensions(x + 10, startY + 62, 60, 16).build();
 
         nameField.setVisible(false);
         loreField.setVisible(false);
@@ -124,6 +123,15 @@ public class ForgeScreen extends HandledScreen<ForgeScreenHandler> {
     @Override
     public void render(DrawContext ctx, int mx, int my, float delta) {
         super.render(ctx, mx, my, delta);
+
+        // Draw NBT fields on top of the base screen when visible
+        if (nbtVisible) {
+            nameField.render(ctx, mx, my, delta);
+            loreField.render(ctx, mx, my, delta);
+            enchantField.render(ctx, mx, my, delta);
+            colorField.render(ctx, mx, my, delta);
+        }
+
         drawMouseoverTooltip(ctx, mx, my);
     }
 
@@ -152,15 +160,18 @@ public class ForgeScreen extends HandledScreen<ForgeScreenHandler> {
                 ? java.util.List.of()
                 : java.util.Arrays.stream(ench.split(","))
                         .map(String::trim)
-                        .filter(value -> !value.isBlank())
+                        .filter(v -> !v.isBlank())
                         .toList();
 
+        // FIX: read the actual position from the ForgeBlockEntity instead of
+        // hard-coding BlockPos.ORIGIN, which sent the packet to the wrong block
+        // and caused a NullPointerException / "network error" in singleplayer.
         BlockPos blockPos = BlockPos.ORIGIN;
-        Inventory inv = handler.getInventory();
-        if (inv instanceof ForgeBlockEntity forge) {
+        if (handler.getInventory() instanceof ForgeBlockEntity forge) {
             blockPos = forge.getPos();
         }
 
-        ClientPlayNetworking.send(new ForgeNbtPayload(blockPos, name, lore, color, enchantments, 0));
+        ClientPlayNetworking.send(
+                new ForgeNbtPayload(blockPos, name, lore, color, enchantments, 0));
     }
 }
