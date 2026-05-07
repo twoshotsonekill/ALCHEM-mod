@@ -362,8 +362,8 @@ class BuilderAiIntegrationTest {
 
     @Test
     void configDefaultsAreValid() {
-        assertEquals("deepseek/deepseek-v4-pro", AlchemodConfig.DEFAULT_BUILDER_MODEL);
-        assertEquals("deepseek/deepseek-v4-pro", AlchemodConfig.DEFAULT_CREATOR_MODEL);
+        assertEquals("openai/gpt-5.4-mini", AlchemodConfig.DEFAULT_BUILDER_MODEL);
+        assertEquals("google/gemini-2.5-flash-lite-preview-05-20", AlchemodConfig.DEFAULT_CREATOR_MODEL);
         assertTrue(AlchemodConfig.DEFAULT_BUILDER_MAX_TOKENS > 0);
     }
 }

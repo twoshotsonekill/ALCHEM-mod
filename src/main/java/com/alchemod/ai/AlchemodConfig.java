@@ -23,15 +23,22 @@ public record AlchemodConfig(
         int forgeTimeoutSeconds
 ) {
 
-    public static final String DEFAULT_BUILDER_MODEL  = "deepseek/deepseek-v4-pro";
-    public static final String DEFAULT_CREATOR_MODEL  = "deepseek/deepseek-v4-pro";
-    public static final String DEFAULT_FORGE_MODEL    = "deepseek/deepseek-v4-pro";
+    public static final String DEFAULT_BUILDER_MODEL = "openai/gpt-5.4-mini";
+    public static final String DEFAULT_CREATOR_MODEL = "google/gemini-2.5-flash-lite-preview-05-20";
+    public static final String DEFAULT_FORGE_MODEL = "openai/gpt-4o-mini";
     public static final int DEFAULT_BUILDER_MAX_TOKENS = 3500;
-    public static final int DEFAULT_CREATOR_MAX_TOKENS_SCRIPTED = 1200;
-    public static final int DEFAULT_CREATOR_MAX_TOKENS_PLAIN    = 400;
+
+    // Raised from 1200 → 2200 so the model has room to emit both the behavior
+    // script AND the inline sprite_commands array in the same JSON response.
+    public static final int DEFAULT_CREATOR_MAX_TOKENS_SCRIPTED = 2200;
+
+    public static final int DEFAULT_CREATOR_MAX_TOKENS_PLAIN = 400;
     public static final int DEFAULT_BUILDER_TIMEOUT_SECONDS = 60;
-    public static final int DEFAULT_CREATOR_TIMEOUT_SECONDS = 40;
-    public static final int DEFAULT_FORGE_TIMEOUT_SECONDS   = 10;
+
+    // Raised from 40 → 60 to accommodate the larger response.
+    public static final int DEFAULT_CREATOR_TIMEOUT_SECONDS = 60;
+
+    public static final int DEFAULT_FORGE_TIMEOUT_SECONDS = 10;
 
     public String forgeModel() {
         return forgeModel;
@@ -50,33 +57,33 @@ public record AlchemodConfig(
         try (InputStream in = Files.newInputStream(configPath)) {
             properties.load(in);
         } catch (IOException e) {
-            logger.error("[Alchemod] Failed to read config: {}", e.getMessage());
+            if (logger != null) logger.error("[Alchemod] Failed to read config: {}", e.getMessage());
         }
 
         String configApiKey = properties.getProperty("openrouter_api_key", "").trim();
-        String envApiKey    = System.getenv("OPENROUTER_API_KEY");
+        String envApiKey = System.getenv("OPENROUTER_API_KEY");
         String effectiveApiKey = configApiKey;
         if (envApiKey != null && !envApiKey.isBlank()) {
-            logger.info("[Alchemod] API key loaded from environment variable.");
+            if (logger != null) logger.info("[Alchemod] API key loaded from environment variable.");
             effectiveApiKey = envApiKey.trim();
         } else if (!configApiKey.isBlank() && !configApiKey.startsWith("YOUR_")) {
-            logger.info("[Alchemod] API key loaded from config/alchemod.properties.");
+            if (logger != null) logger.info("[Alchemod] API key loaded from config/alchemod.properties.");
         } else {
             effectiveApiKey = "";
-            logger.warn("[Alchemod] No API key configured. Set OPENROUTER_API_KEY or update config/alchemod.properties.");
+            if (logger != null) logger.warn("[Alchemod] No API key configured. Set OPENROUTER_API_KEY or update config/alchemod.properties.");
         }
 
         return new AlchemodConfig(
                 effectiveApiKey,
                 stringProperty(properties, "builder_model", DEFAULT_BUILDER_MODEL),
                 stringProperty(properties, "creator_model", DEFAULT_CREATOR_MODEL),
-                stringProperty(properties, "forge_model",   DEFAULT_FORGE_MODEL),
-                intProperty(properties, "builder_max_tokens",          DEFAULT_BUILDER_MAX_TOKENS,          logger),
+                stringProperty(properties, "forge_model", DEFAULT_FORGE_MODEL),
+                intProperty(properties, "builder_max_tokens", DEFAULT_BUILDER_MAX_TOKENS, logger),
                 intProperty(properties, "creator_max_tokens_scripted", DEFAULT_CREATOR_MAX_TOKENS_SCRIPTED, logger),
-                intProperty(properties, "creator_max_tokens_plain",    DEFAULT_CREATOR_MAX_TOKENS_PLAIN,    logger),
-                intProperty(properties, "builder_timeout_seconds",     DEFAULT_BUILDER_TIMEOUT_SECONDS,     logger),
-                intProperty(properties, "creator_timeout_seconds",     DEFAULT_CREATOR_TIMEOUT_SECONDS,     logger),
-                intProperty(properties, "forge_timeout_seconds",       DEFAULT_FORGE_TIMEOUT_SECONDS,       logger));
+                intProperty(properties, "creator_max_tokens_plain", DEFAULT_CREATOR_MAX_TOKENS_PLAIN, logger),
+                intProperty(properties, "builder_timeout_seconds", DEFAULT_BUILDER_TIMEOUT_SECONDS, logger),
+                intProperty(properties, "creator_timeout_seconds", DEFAULT_CREATOR_TIMEOUT_SECONDS, logger),
+                intProperty(properties, "forge_timeout_seconds", DEFAULT_FORGE_TIMEOUT_SECONDS, logger));
     }
 
     private static String stringProperty(Properties properties, String key, String fallback) {
@@ -86,11 +93,14 @@ public record AlchemodConfig(
 
     private static int intProperty(Properties properties, String key, int fallback, Logger logger) {
         String raw = properties.getProperty(key);
-        if (raw == null || raw.isBlank()) return fallback;
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+
         try {
             return Math.max(1, Integer.parseInt(raw.trim()));
         } catch (NumberFormatException e) {
-            logger.warn("[Alchemod] Invalid integer for {} in config: {}", key, raw);
+            if (logger != null) logger.warn("[Alchemod] Invalid integer for {} in config: {}", key, raw);
             return fallback;
         }
     }
@@ -121,6 +131,7 @@ public record AlchemodConfig(
                 creator_model=%s
                 forge_model=%s
                 builder_max_tokens=%d
+                # creator_max_tokens_scripted includes room for inline sprite_commands
                 creator_max_tokens_scripted=%d
                 creator_max_tokens_plain=%d
                 builder_timeout_seconds=%d
@@ -139,9 +150,9 @@ public record AlchemodConfig(
 
         try (OutputStream out = Files.newOutputStream(path)) {
             out.write(template.getBytes(StandardCharsets.UTF_8));
-            logger.info("[Alchemod] Created default config at {}", path);
+            if (logger != null) logger.info("[Alchemod] Created default config at {}", path);
         } catch (IOException e) {
-            logger.error("[Alchemod] Could not create config file: {}", e.getMessage());
+            if (logger != null) logger.error("[Alchemod] Could not create config file: {}", e.getMessage());
         }
     }
 }

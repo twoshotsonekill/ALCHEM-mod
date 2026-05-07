@@ -10,16 +10,21 @@ import net.fabricmc.api.Environment;
 import net.minecraft.client.texture.NativeImage;
 
 /**
- * Interprets the structured {@code creator_sprite_commands} NBT value that was
- * produced by {@link com.alchemod.ai.SpriteToolClient} and paints the result
- * into a 16×16 {@link NativeImage}.
+ * Interprets the structured {@code creator_sprite_commands} NBT value and paints
+ * the result into a 16×16 {@link NativeImage}.
  *
- * <p>This class is client-side only and intentionally contains zero Rhino / script
- * execution.  The only logic here is a simple {@code switch} over four drawing ops:
- * {@code fill}, {@code rect}, {@code pixel}, and {@code circle}.
+ * <h3>Op types</h3>
+ * <ul>
+ *   <li>{@code fill}   — paint every pixel. r/g/b = 0 together means fully transparent.</li>
+ *   <li>{@code rect}   — filled rectangle (x1,y1)→(x2,y2), inclusive.</li>
+ *   <li>{@code pixel}  — single pixel at (x,y).</li>
+ *   <li>{@code circle} — filled circle centred at (cx,cy) with given radius (1-8).</li>
+ * </ul>
  *
- * <p>Returns {@code null} if the JSON cannot be parsed or no valid commands are found;
- * callers must fall through to the glyph / Pollinations texture paths in that case.
+ * All ops accept an optional {@code a} field (0-255, default 255) for alpha.
+ * When {@code fill} is called with r=g=b=0 and no {@code a} field (or a=0),
+ * the canvas is cleared to fully transparent — the intended "transparent background"
+ * convention used in the system prompt.
  */
 @Environment(EnvType.CLIENT)
 public final class SpriteCommandRenderer {
@@ -27,22 +32,13 @@ public final class SpriteCommandRenderer {
     private SpriteCommandRenderer() {
     }
 
-    /**
-     * @param commandsJson  The raw JSON string stored in {@code creator_sprite_commands}.
-     *                      Expected shape: {@code {"commands":[{"op":"fill","r":10,"g":10,"b":20},…]}}
-     * @return A freshly allocated 16×16 RGBA {@link NativeImage}, or {@code null} on failure.
-     */
     public static NativeImage render(String commandsJson) {
-        if (commandsJson == null || commandsJson.isBlank()) {
-            return null;
-        }
+        if (commandsJson == null || commandsJson.isBlank()) return null;
 
         try {
             JsonObject root = JsonParser.parseString(commandsJson).getAsJsonObject();
             JsonArray commands = root.getAsJsonArray("commands");
-            if (commands == null || commands.isEmpty()) {
-                return null;
-            }
+            if (commands == null || commands.isEmpty()) return null;
 
             NativeImage image = new NativeImage(NativeImage.Format.RGBA, 16, 16, false);
             clearTransparent(image);
@@ -52,12 +48,22 @@ public final class SpriteCommandRenderer {
                 if (!el.isJsonObject()) continue;
                 JsonObject cmd = el.getAsJsonObject();
                 String op = getString(cmd, "op");
+
                 int r = clampByte(getInt(cmd, "r"));
                 int g = clampByte(getInt(cmd, "g"));
                 int b = clampByte(getInt(cmd, "b"));
-                // NativeImage stores ABGR on little-endian platforms; use the helper
-                // setColorArgb which expects 0xAARRGGBB.
-                int argb = 0xFF000000 | (r << 16) | (g << 8) | b;
+                // Optional alpha: omitted → 255 (fully opaque).
+                int a = cmd.has("a") ? clampByte(getInt(cmd, "a")) : 255;
+
+                // Convention: fill with r=g=b=0 (and default/zero alpha) means
+                // "transparent background" — clear the canvas rather than paint black.
+                if ("fill".equals(op) && r == 0 && g == 0 && b == 0 && a <= 0) {
+                    clearTransparent(image);
+                    executed++;
+                    continue;
+                }
+
+                int argb = (a << 24) | (r << 16) | (g << 8) | b;
 
                 switch (op) {
                     case "fill"   -> executeFill(image, argb);
@@ -69,10 +75,7 @@ public final class SpriteCommandRenderer {
                 executed++;
             }
 
-            if (executed == 0) {
-                image.close();
-                return null;
-            }
+            if (executed == 0) { image.close(); return null; }
             return image;
 
         } catch (Exception e) {
@@ -84,44 +87,34 @@ public final class SpriteCommandRenderer {
     // ── Operations ────────────────────────────────────────────────────────────
 
     private static void executeFill(NativeImage image, int argb) {
-        for (int y = 0; y < 16; y++) {
-            for (int x = 0; x < 16; x++) {
+        for (int y = 0; y < 16; y++)
+            for (int x = 0; x < 16; x++)
                 image.setColorArgb(x, y, argb);
-            }
-        }
     }
 
     private static void executeRect(NativeImage image, JsonObject cmd, int argb) {
-        int x1 = clampCoord(getInt(cmd, "x1"));
-        int y1 = clampCoord(getInt(cmd, "y1"));
-        int x2 = clampCoord(getInt(cmd, "x2"));
-        int y2 = clampCoord(getInt(cmd, "y2"));
-        for (int y = Math.min(y1, y2); y <= Math.max(y1, y2); y++) {
-            for (int x = Math.min(x1, x2); x <= Math.max(x1, x2); x++) {
+        int x1 = clampCoord(getInt(cmd, "x1")), y1 = clampCoord(getInt(cmd, "y1"));
+        int x2 = clampCoord(getInt(cmd, "x2")), y2 = clampCoord(getInt(cmd, "y2"));
+        for (int y = Math.min(y1, y2); y <= Math.max(y1, y2); y++)
+            for (int x = Math.min(x1, x2); x <= Math.max(x1, x2); x++)
                 image.setColorArgb(x, y, argb);
-            }
-        }
     }
 
     private static void executePixel(NativeImage image, JsonObject cmd, int argb) {
-        int x = clampCoord(getInt(cmd, "x"));
-        int y = clampCoord(getInt(cmd, "y"));
-        image.setColorArgb(x, y, argb);
+        image.setColorArgb(clampCoord(getInt(cmd, "x")), clampCoord(getInt(cmd, "y")), argb);
     }
 
     private static void executeCircle(NativeImage image, JsonObject cmd, int argb) {
-        int cx     = clampCoord(getInt(cmd, "cx"));
-        int cy     = clampCoord(getInt(cmd, "cy"));
+        int cx = clampCoord(getInt(cmd, "cx"));
+        int cy = clampCoord(getInt(cmd, "cy"));
         int radius = Math.max(1, Math.min(8, getInt(cmd, "radius")));
-        int r2     = radius * radius;
+        int r2 = radius * radius;
         for (int dy = -radius; dy <= radius; dy++) {
             for (int dx = -radius; dx <= radius; dx++) {
                 if (dx * dx + dy * dy <= r2) {
-                    int px = cx + dx;
-                    int py = cy + dy;
-                    if (px >= 0 && px < 16 && py >= 0 && py < 16) {
+                    int px = cx + dx, py = cy + dy;
+                    if (px >= 0 && px < 16 && py >= 0 && py < 16)
                         image.setColorArgb(px, py, argb);
-                    }
                 }
             }
         }
@@ -130,11 +123,9 @@ public final class SpriteCommandRenderer {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static void clearTransparent(NativeImage image) {
-        for (int y = 0; y < 16; y++) {
-            for (int x = 0; x < 16; x++) {
+        for (int y = 0; y < 16; y++)
+            for (int x = 0; x < 16; x++)
                 image.setColorArgb(x, y, 0x00000000);
-            }
-        }
     }
 
     private static String getString(JsonObject obj, String key) {
