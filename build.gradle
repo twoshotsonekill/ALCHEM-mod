@@ -29,6 +29,22 @@ java {
     withSourcesJar()
 }
 
+sourceSets {
+    client {
+        compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output
+        runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output
+    }
+}
+
+loom {
+    runs {
+        client {
+            client()
+            source sourceSets.client
+        }
+    }
+}
+
 tasks.withType(JavaCompile).configureEach {
     it.options.release = 21
 }

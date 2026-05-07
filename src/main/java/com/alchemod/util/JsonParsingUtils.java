@@ -120,4 +120,25 @@ public final class JsonParsingUtils {
     public static boolean isJsonObject(JsonObject obj, String key) {
         return obj != null && obj.has(key) && obj.get(key).isJsonObject();
     }
+
+    /**
+     * Get a list of strings from a JSON array value.
+     */
+    public static java.util.List<String> getStringList(JsonObject obj, String key) {
+        if (obj == null || !obj.has(key)) return java.util.List.of();
+        JsonElement el = obj.get(key);
+        if (!el.isJsonArray()) return java.util.List.of();
+        
+        java.util.List<String> result = new java.util.ArrayList<>();
+        for (JsonElement item : el.getAsJsonArray()) {
+            if (item != null && !item.isJsonNull()) {
+                try {
+                    result.add(item.getAsString());
+                } catch (Exception e) {
+                    // Skip non-string elements
+                }
+            }
+        }
+        return result;
+    }
 }

@@ -7,6 +7,7 @@ import com.alchemod.creator.DynamicItem;
 import com.alchemod.creator.DynamicItemRegistry;
 import com.alchemod.item.OddityItem;
 import com.alchemod.screen.CreatorScreenHandler;
+import com.alchemod.util.JsonParsingUtils;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -324,19 +325,20 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
     private CreationResult parseCreationResult(String apiBody) {
         try {
             String content = OpenRouterClient.extractContent(apiBody);
-            String jsonBody = extractFirstJsonObject(stripCodeFence(content != null ? content : apiBody));
+            String jsonBody = JsonParsingUtils.extractFirstJsonObject(
+                JsonParsingUtils.stripCodeFence(content != null ? content : apiBody));
             if (jsonBody == null) return CreationResult.error("Could not parse AI response");
 
             JsonObject object = JsonParser.parseString(jsonBody).getAsJsonObject();
-            String name         = getString(object, "name",         "Mysterious Relic");
-            String description  = getString(object, "description",  "An enigmatic object of unknown power.");
-            String spritePrompt = getString(object, "sprite_prompt", name + " magical glowing artifact");
-            String rarity       = normalise(getString(object, "rarity",    "common"));
-            String itemType     = normalise(getString(object, "item_type", "use_item"));
-            List<String> effects = sanitiseEffects(getStringList(object, "effects"));
-            String special      = sanitiseSpecial(getNullableString(object, "special"));
-            String mobType      = sanitiseMobType(itemType, getNullableString(object, "mob_type"));
-            String behaviorScript = getNullableString(object, "behavior_script");
+            String name         = JsonParsingUtils.getString(object, "name",         "Mysterious Relic");
+            String description  = JsonParsingUtils.getString(object, "description",  "An enigmatic object of unknown power.");
+            String spritePrompt = JsonParsingUtils.getString(object, "sprite_prompt", name + " magical glowing artifact");
+            String rarity       = JsonParsingUtils.normalise(JsonParsingUtils.getString(object, "rarity",    "common"));
+            String itemType     = JsonParsingUtils.normalise(JsonParsingUtils.getString(object, "item_type", "use_item"));
+            List<String> effects = sanitiseEffects(JsonParsingUtils.getStringList(object, "effects"));
+            String special      = sanitiseSpecial(JsonParsingUtils.getNullableString(object, "special"));
+            String mobType      = sanitiseMobType(itemType, JsonParsingUtils.getNullableString(object, "mob_type"));
+            String behaviorScript = JsonParsingUtils.getNullableString(object, "behavior_script");
 
             // Inline sprite_commands — wrap in {"commands":[...]} for SpriteCommandRenderer
             String inlineSpriteCommands = null;
@@ -385,11 +387,12 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
 
     private List<String> sanitiseEffects(List<String> inputEffects) {
         List<String> clean = new ArrayList<>();
-        for (String e : inputEffects) { String n = normalise(e); if (VALID_EFFECTS.contains(n) && !clean.contains(n)) clean.add(n); }
+        for (String e : inputEffects) { String n = JsonParsingUtils.normalise(e); if (VALID_EFFECTS.contains(n) && !clean.contains(n)) clean.add(n); }
         return clean;
     }
-    private String sanitiseSpecial(String value) { if (value==null) return null; String n=normalise(value); return VALID_SPECIALS.contains(n)?n:null; }
-    private String sanitiseMobType(String itemType, String value) { if (!"spawn_egg".equals(itemType)) return null; String n=normalise(value); return VALID_MOBS.contains(n)?n:"bat"; }
+
+    private String sanitiseSpecial(String value) { if (value==null) return null; String n=JsonParsingUtils.normalise(value); return VALID_SPECIALS.contains(n)?n:null; }
+    private String sanitiseMobType(String itemType, String value) { if (!"spawn_egg".equals(itemType)) return null; String n=JsonParsingUtils.normalise(value); return VALID_MOBS.contains(n)?n:"bat"; }
 
     // ── Apply result ──────────────────────────────────────────────────────────
 
@@ -503,46 +506,6 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
             world.updateListeners(pos, getCachedState(), getCachedState(),
                     net.minecraft.block.Block.NOTIFY_LISTENERS);
     }
-
-    // ── JSON helpers ──────────────────────────────────────────────────────────
-
-    private static String stripCodeFence(String value) {
-        String t = value == null ? "" : value.trim();
-        if (!t.startsWith("```")) return t;
-        int first = t.indexOf('\n'), last = t.lastIndexOf("```");
-        if (first < 0 || last <= first) return t.replace("```", "").trim();
-        return t.substring(first + 1, last).trim();
-    }
-
-    private static String extractFirstJsonObject(String content) {
-        int start = -1, depth = 0;
-        boolean inStr = false, esc = false;
-        for (int i = 0; i < content.length(); i++) {
-            char c = content.charAt(i);
-            if (esc)    { esc = false; continue; }
-            if (c=='\\') { esc = true; continue; }
-            if (c=='"')  { inStr = !inStr; continue; }
-            if (inStr)   continue;
-            if (c=='{')  { if (depth==0) start=i; depth++; }
-            else if (c=='}') { depth--; if (depth==0 && start>=0) return content.substring(start, i+1); }
-        }
-        return null;
-    }
-
-    private static String getString(JsonObject o, String key, String fallback) {
-        JsonElement el = o.get(key); return el!=null&&!el.isJsonNull() ? el.getAsString().trim() : fallback;
-    }
-    private static String getNullableString(JsonObject o, String key) {
-        JsonElement el = o.get(key); if (el==null||el.isJsonNull()) return null;
-        String v = el.getAsString().trim(); return v.isBlank()||"null".equalsIgnoreCase(v) ? null : v;
-    }
-    private static List<String> getStringList(JsonObject o, String key) {
-        JsonElement el = o.get(key); if (el==null||!el.isJsonArray()) return List.of();
-        List<String> vals = new ArrayList<>();
-        for (JsonElement item : el.getAsJsonArray()) if (item!=null&&!item.isJsonNull()) vals.add(item.getAsString());
-        return vals;
-    }
-    private static String normalise(String value) { return value==null?"":value.toLowerCase().replace("minecraft:","").trim(); }
 
     // ── Fallback helpers ──────────────────────────────────────────────────────
 

@@ -3,6 +3,7 @@ package com.alchemod.block;
 import com.alchemod.AlchemodInit;
 import com.alchemod.ai.OpenRouterClient;
 import com.alchemod.screen.ForgeScreenHandler;
+import com.alchemod.util.JsonParsingUtils;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -191,8 +192,8 @@ Rules:
 
     private ForgeResult parseForgeResult(String content) {
         try {
-            String cleaned = stripCodeFence(content != null ? content.trim() : "");
-            String jsonBody = extractFirstJsonObject(cleaned);
+            String cleaned = JsonParsingUtils.stripCodeFence(content != null ? content.trim() : "");
+            String jsonBody = JsonParsingUtils.extractFirstJsonObject(cleaned);
             if (jsonBody == null) {
                 // Fallback: look for a bare item id
                 return new ForgeResult(extractBareItemId(cleaned), null, null, null, List.of(), null);
@@ -200,13 +201,13 @@ Rules:
 
             JsonObject obj = JsonParser.parseString(jsonBody).getAsJsonObject();
 
-            String itemId = getString(obj, "item_id", null);
+            String itemId = JsonParsingUtils.getString(obj, "item_id", null);
             if (itemId == null) itemId = extractBareItemId(cleaned);
             if (itemId == null) itemId = "minecraft:nether_star";
 
-            String name   = getNullable(obj, "name");
-            String lore   = getNullable(obj, "lore");
-            String rarity = normalise(getNullable(obj, "rarity"));
+            String name   = JsonParsingUtils.getNullableString(obj, "name");
+            String lore   = JsonParsingUtils.getNullableString(obj, "lore");
+            String rarity = normalise(JsonParsingUtils.getNullableString(obj, "rarity"));
             if (rarity != null && !List.of("common","uncommon","rare","epic","legendary").contains(rarity))
                 rarity = null;
 
@@ -215,7 +216,7 @@ Rules:
                 for (JsonElement el : obj.getAsJsonArray("enchantments")) {
                     if (!el.isJsonObject()) continue;
                     JsonObject e = el.getAsJsonObject();
-                    String id    = getString(e, "id", null);
+                    String id    = JsonParsingUtils.getString(e, "id", null);
                     int    level = e.has("level") ? e.get("level").getAsInt() : 1;
                     if (id != null) enchants.add(new EnchantSpec(id, Math.max(1, Math.min(level, 10))));
                 }
@@ -463,48 +464,11 @@ Rules:
             world.updateListeners(pos, getCachedState(), getCachedState(), Block.NOTIFY_LISTENERS);
     }
 
-    // ── JSON helpers ──────────────────────────────────────────────────────────
-
-    private static String stripCodeFence(String s) {
-        if (!s.startsWith("```")) return s;
-        int nl   = s.indexOf('\n');
-        int last = s.lastIndexOf("```");
-        return (nl < 0 || last <= nl) ? s.replace("```","").trim()
-                                      : s.substring(nl + 1, last).trim();
-    }
-
-    private static String extractFirstJsonObject(String content) {
-        int start = -1, depth = 0;
-        boolean inStr = false, esc = false;
-        for (int i = 0; i < content.length(); i++) {
-            char c = content.charAt(i);
-            if (esc)        { esc = false; continue; }
-            if (c == '\\')  { esc = true;  continue; }
-            if (c == '"')   { inStr = !inStr; continue; }
-            if (inStr)      continue;
-            if (c == '{')   { if (depth++ == 0) start = i; }
-            else if (c == '}') { if (--depth == 0 && start >= 0) return content.substring(start, i + 1); }
-        }
-        return null;
-    }
-
-    private static String getString(JsonObject o, String key, String fallback) {
-        JsonElement el = o.get(key);
-        return (el == null || el.isJsonNull()) ? fallback : el.getAsString().trim();
-    }
-
-    private static String getNullable(JsonObject o, String key) {
-        JsonElement el = o.get(key);
-        if (el == null || el.isJsonNull()) return null;
-        String v = el.getAsString().trim();
-        return v.isBlank() || "null".equalsIgnoreCase(v) ? null : v;
-    }
+    // ── Enchantment / lore helpers ────────────────────────────────────────────
 
     private static String normalise(String v) {
         return v == null ? null : v.toLowerCase().replace("minecraft:","").trim();
     }
-
-    // ── Enchantment / lore helpers ────────────────────────────────────────────
 
     private static ParsedEnchantment parseEnchantment(String spec) {
         if (spec == null || spec.isBlank()) return null;
