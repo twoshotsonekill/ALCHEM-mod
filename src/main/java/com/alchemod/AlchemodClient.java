@@ -1,17 +1,38 @@
 package com.alchemod;
 
+import com.alchemod.screen.BuilderScreen;
+import com.alchemod.screen.CreatorScreen;
+import com.alchemod.screen.ForgeScreen;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.fabricmc.fabric.api.blockrenderlayer.v1.BlockRenderLayerMap;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.ingame.HandledScreens;
+import net.minecraft.client.render.RenderLayer;
 
 @Environment(EnvType.CLIENT)
 public class AlchemodClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        // DynamicItemOverlayRenderer removed - client rendering simplified
+        HandledScreens.register(AlchemodInit.FORGE_HANDLER, ForgeScreen::new);
+        HandledScreens.register(AlchemodInit.CREATOR_HANDLER, CreatorScreen::new);
+        HandledScreens.register(AlchemodInit.BUILDER_HANDLER, BuilderScreen::new);
+
+        BlockRenderLayerMap.INSTANCE.putBlock(
+                AlchemodInit.ALCHEMICAL_GLASS_BLOCK, RenderLayer.getTranslucent());
+        BlockRenderLayerMap.INSTANCE.putBlock(
+                AlchemodInit.ETHER_CRYSTAL_BLOCK, RenderLayer.getTranslucent());
+
+        HudRenderCallback.EVENT.register((context, tickCounter) ->
+                DynamicItemOverlayRenderer.renderHotbar(context, MinecraftClient.getInstance()));
+
+        ScreenEvents.BEFORE_INIT.register((client, screen, scaledWidth, scaledHeight) ->
+                ScreenEvents.afterRender(screen).register(
+                        (s, ctx, mouseX, mouseY, delta) ->
+                                DynamicItemOverlayRenderer.renderScreen(s, ctx)));
     }
 }
