@@ -1,6 +1,7 @@
 package com.alchemod.creator;
 
 import com.alchemod.AlchemodInit;
+import com.alchemod.item.GeneratedItem;
 import com.alchemod.item.OddityItem;
 import net.minecraft.item.Item;
 import net.minecraft.registry.Registries;
@@ -12,7 +13,9 @@ import net.minecraft.util.Identifier;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public final class DynamicItemRegistry {
 
@@ -23,6 +26,7 @@ public final class DynamicItemRegistry {
 
     private static final List<DynamicItem> POOL = new ArrayList<>();
     private static final Map<Integer, CreatedItemMeta> META = new ConcurrentHashMap<>();
+    private static final AtomicInteger NEXT_RUNTIME_ID = new AtomicInteger();
 
     private static int nextSlot = 0;
 
@@ -79,6 +83,34 @@ public final class DynamicItemRegistry {
         return META.get(slot);
     }
 
+    public static RuntimeItemResult tryRegisterRuntimeItem(CreatedItemMeta meta) {
+        if (meta == null) {
+            return RuntimeItemResult.failure("missing metadata");
+        }
+
+        String safeName = sanitiseId(meta.name());
+        int sequence = NEXT_RUNTIME_ID.getAndIncrement();
+        Identifier id = Identifier.of(
+                AlchemodInit.MOD_ID,
+                "generated/" + safeName + "_" + Integer.toUnsignedString(meta.slot(), 16) + "_" + sequence);
+
+        try {
+            GeneratedItem item = new GeneratedItem(
+                    new Item.Settings()
+                            .maxCount(maxCountFor(meta.itemType()))
+                            .registryKey(RegistryKey.of(RegistryKeys.ITEM, id)),
+                    id.toString(),
+                    meta.itemType());
+            Registry.register(Registries.ITEM, id, item);
+            AlchemodInit.LOG.warn("[Creator] Runtime item injection succeeded for {}. This is unsafe and may not survive registry reloads.", id);
+            return RuntimeItemResult.success(item, id);
+        } catch (Throwable t) {
+            AlchemodInit.LOG.warn("[Creator] Runtime item injection failed for {}: {}. Falling back to template item.",
+                    id, t.getMessage());
+            return RuntimeItemResult.failure(t.getMessage());
+        }
+    }
+
     // ── Metadata record ───────────────────────────────────────────────────────
 
     public record CreatedItemMeta(
@@ -133,7 +165,15 @@ public final class DynamicItemRegistry {
         public static String staticItemTypeLabel(String itemType) {
             if (itemType == null || itemType.isBlank()) return "§7Use Item";
             return switch (normalise(itemType)) {
+                case "artifact"  -> "§7Coded Artifact";
+                case "tool"      -> "§7Generated Tool";
+                case "potion"    -> "§7Generated Potion";
+                case "weapon"    -> "§7Generated Weapon";
+                case "wand"      -> "§7Generated Wand";
+                case "charm"     -> "§7Generated Charm";
+                case "scroll"    -> "§7Generated Scroll";
                 case "bow"       -> "§7Magical Bow";
+                case "spawn_item" -> "§7Spawn Item";
                 case "spawn_egg" -> "§7Spawn Egg";
                 case "food"      -> "§7Consumable";
                 case "sword"     -> "§7Melee Weapon";
@@ -184,5 +224,41 @@ public final class DynamicItemRegistry {
         private static String normalise(String value) {
             return value == null ? "" : value.toLowerCase().replace("minecraft:", "").trim();
         }
+    }
+
+    public record RuntimeItemResult(Item item, Identifier id, String error) {
+        public static RuntimeItemResult success(Item item, Identifier id) {
+            return new RuntimeItemResult(item, id, null);
+        }
+
+        public static RuntimeItemResult failure(String error) {
+            return new RuntimeItemResult(null, null, error == null ? "unknown" : error);
+        }
+
+        public boolean succeeded() {
+            return item != null && id != null;
+        }
+    }
+
+    private static int maxCountFor(String itemType) {
+        return switch (normaliseType(itemType)) {
+            case "potion", "wand", "charm", "scroll", "artifact", "spawn_item", "spawn_egg", "totem" -> 1;
+            case "throwable", "food" -> 16;
+            default -> 1;
+        };
+    }
+
+    private static String sanitiseId(String name) {
+        String lower = name == null ? "item" : name.toLowerCase(Locale.ROOT);
+        String cleaned = lower.replaceAll("[^a-z0-9_]+", "_").replaceAll("_+", "_");
+        cleaned = cleaned.replaceAll("^_+", "").replaceAll("_+$", "");
+        if (cleaned.isBlank()) {
+            return "item";
+        }
+        return cleaned.length() <= 32 ? cleaned : cleaned.substring(0, 32);
+    }
+
+    private static String normaliseType(String value) {
+        return value == null ? "" : value.toLowerCase(Locale.ROOT).replace("minecraft:", "").trim();
     }
 }

@@ -7,9 +7,6 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.blockrenderlayer.v1.BlockRenderLayerMap;
-import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
-import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.ingame.HandledScreens;
 import net.minecraft.client.render.RenderLayer;
 
@@ -27,12 +24,6 @@ public class AlchemodClient implements ClientModInitializer {
         BlockRenderLayerMap.INSTANCE.putBlock(
                 AlchemodInit.ETHER_CRYSTAL_BLOCK, RenderLayer.getTranslucent());
 
-        HudRenderCallback.EVENT.register((context, tickCounter) ->
-                DynamicItemOverlayRenderer.renderHotbar(context, MinecraftClient.getInstance()));
-
-        ScreenEvents.BEFORE_INIT.register((client, screen, scaledWidth, scaledHeight) ->
-                ScreenEvents.afterRender(screen).register(
-                        (s, ctx, mouseX, mouseY, delta) ->
-                                DynamicItemOverlayRenderer.renderScreen(s, ctx)));
+        // Generated item sprites are drawn by ItemRendererMixin in every render context.
     }
 }

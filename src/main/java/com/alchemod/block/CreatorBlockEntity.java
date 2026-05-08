@@ -65,7 +65,8 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
             "common", "uncommon", "rare", "epic", "legendary");
 
     private static final Set<String> VALID_ITEM_TYPES = Set.of(
-            "use_item", "bow", "spawn_egg", "food", "sword", "totem", "throwable");
+            "use_item", "artifact", "tool", "potion", "weapon", "sword", "bow", "wand",
+            "charm", "scroll", "throwable", "spawn_item", "spawn_egg", "food", "totem");
 
     private static final Set<String> VALID_MOBS = Set.of(
             "zombie", "skeleton", "creeper", "spider", "enderman", "blaze", "witch",
@@ -194,7 +195,7 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
           + "  \"description\": \"One sentence flavour text.\",\n"
           + "  \"sprite_prompt\": \"8-15 word pixel art description of a concrete object\",\n"
           + "  \"rarity\": \"common|uncommon|rare|epic|legendary\",\n"
-          + "  \"item_type\": \"use_item|bow|spawn_egg|food|sword|totem|throwable\",\n"
+          + "  \"item_type\": \"tool|potion|weapon|wand|charm|scroll|throwable|spawn_item|spawn_egg|artifact|use_item|bow|food|sword|totem\",\n"
           + "  \"effects\": [\"speed\"],\n"
           + "  \"special\": \"ignite\",\n"
           + "  \"mob_type\": null,\n"
@@ -206,7 +207,7 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
           + "Valid effects: speed, strength, regeneration, resistance, fire_resistance, night_vision, absorption, luck, haste, jump_boost, slow_falling, water_breathing\n"
           + "Valid specials: ignite, knockback, heal_aura, launch, freeze, drain, phase, lightning, void_step\n"
           + "Valid mob_type (spawn_egg only): zombie, skeleton, creeper, spider, enderman, blaze, witch, phantom, slime, magma_cube, hoglin, strider, cow, pig, sheep, chicken, bat, wolf, rabbit, fox, bee, axolotl, parrot\n"
-          + "mob_type must be null unless item_type is spawn_egg. special must be null if no active ability.\n"
+          + "mob_type must be null unless item_type is spawn_item or spawn_egg. special must be null if no active ability.\n"
           + "common/uncommon: 0-2 effects; rare: 1-2; epic: 2-3; legendary: 3-4.\n"
           + "rare/epic/legendary should usually have a special.\n"
           + "Avoid generic glowing gems. Prefer weird stuff: junk gadgets, cursed snacks, unstable bows, masks, jars, bombs, puppets, keys, horns, fake relics.\n"
@@ -392,7 +393,11 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
     }
 
     private String sanitiseSpecial(String value) { if (value==null) return null; String n=JsonParsingUtils.normalise(value); return VALID_SPECIALS.contains(n)?n:null; }
-    private String sanitiseMobType(String itemType, String value) { if (!"spawn_egg".equals(itemType)) return null; String n=JsonParsingUtils.normalise(value); return VALID_MOBS.contains(n)?n:"bat"; }
+    private String sanitiseMobType(String itemType, String value) {
+        if (!"spawn_egg".equals(itemType) && !"spawn_item".equals(itemType)) return null;
+        String n=JsonParsingUtils.normalise(value);
+        return VALID_MOBS.contains(n)?n:"bat";
+    }
 
     // ── Apply result ──────────────────────────────────────────────────────────
 
@@ -401,15 +406,31 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
 
         if (result.error() != null) { state = STATE_ERROR; progress = 0; markDirty(); return; }
 
-        Item targetItem = DynamicItemRegistry.ODDITY_ITEM;
-        int uid;
+        int uid = (result.name().hashCode() * 31
+                ^ result.spritePrompt().hashCode()
+                ^ result.itemType().hashCode()
+                ^ (int) (System.currentTimeMillis() >>> 10))
+                & 0x3FFFFFFF | 0x40000000;
+        DynamicItemRegistry.CreatedItemMeta meta = new DynamicItemRegistry.CreatedItemMeta(
+                result.name(), result.description(), uid, result.rarity(), result.itemType(),
+                result.effects(), result.special(), result.mobType(), result.behaviorScript());
 
-        if (targetItem != null) {
-            uid = (result.name().hashCode() * 31
-                    ^ result.spritePrompt().hashCode()
-                    ^ (int) (System.currentTimeMillis() >>> 10))
-                    & 0x3FFFFFFF | 0x40000000;
+        Item targetItem = null;
+        String runtimeItemId = "";
+        String injectionError = "";
+        DynamicItemRegistry.RuntimeItemResult runtimeItem = DynamicItemRegistry.tryRegisterRuntimeItem(meta);
+        if (runtimeItem.succeeded()) {
+            targetItem = runtimeItem.item();
+            runtimeItemId = runtimeItem.id().toString();
         } else {
+            injectionError = runtimeItem.error();
+        }
+
+        if (targetItem == null && DynamicItemRegistry.ODDITY_ITEM != null) {
+            targetItem = DynamicItemRegistry.ODDITY_ITEM;
+        }
+
+        if (targetItem == null) {
             DynamicItem dynamicItem = DynamicItemRegistry.claimSlot();
             if (dynamicItem == null) {
                 AlchemodInit.LOG.error("[Creator] Both OddityItem and legacy slot pool are unavailable.");
@@ -441,6 +462,8 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
         tag.putInt   ("charges",           DynamicItemRegistry.CreatedItemMeta.startingChargesForRarity(result.rarity()));
         tag.putString("creator_input_a",   inputIdA);
         tag.putString("creator_input_b",   inputIdB);
+        tag.putString("creator_runtime_item", runtimeItemId);
+        tag.putString("creator_injection_error", injectionError);
         if (result.behaviorScript() != null && !result.behaviorScript().isBlank())
             tag.putString("creator_script", result.behaviorScript());
         if (result.spriteCommands() != null && !result.spriteCommands().isBlank())
@@ -452,10 +475,10 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
         progress = MAX_PROGRESS;
         state = STATE_READY;
 
-        AlchemodInit.LOG.info("[Creator] Created '{}' (uid=0x{}, sprite={}, rarity={}, type={})",
+        AlchemodInit.LOG.info("[Creator] Created '{}' (uid=0x{}, sprite={}, rarity={}, type={}, runtime={})",
                 result.name(), Integer.toHexString(uid),
                 result.spriteCommands() != null ? "inline" : "none",
-                result.rarity(), result.itemType());
+                result.rarity(), result.itemType(), !runtimeItemId.isBlank() ? runtimeItemId : "template");
         markDirty();
     }
 
@@ -510,9 +533,11 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
     // ── Fallback helpers ──────────────────────────────────────────────────────
 
     private static String fallbackSpecial(String effect, String itemType) {
-        if ("bow".equals(itemType))       return "ignite";
-        if ("throwable".equals(itemType)) return "lightning";
-        if ("spawn_egg".equals(itemType)) return "phase";
+        if ("bow".equals(itemType) || "weapon".equals(itemType) || "sword".equals(itemType)) return "ignite";
+        if ("throwable".equals(itemType) || "scroll".equals(itemType)) return "lightning";
+        if ("spawn_egg".equals(itemType) || "spawn_item".equals(itemType)) return "phase";
+        if ("wand".equals(itemType) || "artifact".equals(itemType)) return "drain";
+        if ("charm".equals(itemType) || "potion".equals(itemType)) return "heal_aura";
         return switch (effect) {
             case "strength"        -> "knockback";
             case "speed"           -> "void_step";
@@ -535,14 +560,26 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
             b.append("  player.addEffect('").append(eff).append("', ").append(dur).append(", ").append(amp).append(");\n");
 
         switch (itemType) {
-            case "bow" -> b.append("  var look = player.getLookDir();\n")
+            case "bow", "weapon", "sword" -> b.append("  var look = player.getLookDir();\n")
                     .append("  world.createExplosion(player.getX()+look[0]*7, player.getY()+1.2+look[1]*4, player.getZ()+look[2]*7, ")
                     .append(Set.of("epic","legendary").contains(rarity) ? "3.0" : "2.0").append(", false);\n")
                     .append("  world.playSound('entity.firework_rocket.launch', 0.9, 0.8);\n");
             case "throwable" -> b.append("  var look = player.getLookDir();\n")
                     .append("  world.createExplosion(player.getX()+look[0]*5, player.getY()+1+look[1]*3, player.getZ()+look[2]*5, 1.6, false);\n")
                     .append("  world.playSound('entity.snowball.throw', 0.9, 0.9);\n");
-            case "spawn_egg" -> { if (mobType!=null&&!mobType.isBlank())
+            case "scroll" -> b.append("  var look = player.getLookDir();\n")
+                    .append("  world.spawnLightning(player.getX()+look[0]*8, player.getY()+look[1]*4, player.getZ()+look[2]*8);\n")
+                    .append("  world.playSound('item.book.page_turn', 0.8, 1.3);\n");
+            case "wand", "artifact", "use_item" -> b.append("  var look = player.getLookDir();\n")
+                    .append("  world.playSound('block.amethyst_block.chime', 0.8, 1.2);\n")
+                    .append("  player.addVelocity(look[0]*0.4, 0.25, look[2]*0.4);\n");
+            case "tool" -> b.append("  player.addEffect('haste', ").append(dur).append(", ").append(Math.max(1, amp)).append(");\n")
+                    .append("  world.playSound('block.anvil.use', 0.6, 1.4);\n");
+            case "potion" -> b.append("  player.heal(").append(Set.of("epic","legendary").contains(rarity)?"8":"4").append(");\n")
+                    .append("  world.playSound('entity.generic.drink', 0.7, 1.2);\n");
+            case "charm" -> b.append("  player.addEffect('resistance', ").append(dur).append(", ").append(Math.max(0, amp)).append(");\n")
+                    .append("  world.playSound('block.enchantment_table.use', 0.7, 1.1);\n");
+            case "spawn_egg", "spawn_item" -> { if (mobType!=null&&!mobType.isBlank())
                     b.append("  var look = player.getLookDir();\n")
                             .append("  world.spawnMob('").append(escape(mobType)).append("', player.getX()+look[0]*2, player.getY(), player.getZ()+look[2]*2);\n")
                             .append("  world.playSound('entity.evoker.prepare_summon', 0.8, 1.1);\n"); }

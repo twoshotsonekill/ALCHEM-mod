@@ -2,9 +2,10 @@ package com.alchemod.block;
 
 import com.alchemod.AlchemodInit;
 import com.alchemod.ai.OpenRouterClient;
+import com.alchemod.builder.BuilderBuildPlanner;
+import com.alchemod.builder.BuilderDiagnostics;
 import com.alchemod.builder.BuilderProgram;
 import com.alchemod.builder.BuilderPromptFactory;
-import com.alchemod.builder.BuilderResponseParser;
 import com.alchemod.builder.BuilderRuntime;
 import com.alchemod.screen.BuilderScreenHandler;
 import net.minecraft.block.Block;
@@ -56,6 +57,7 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
     private String promptText = "";
     private String lastError = "";
     private String lastBuildPlan = "";
+    private BuilderDiagnostics diagnostics = BuilderDiagnostics.idle();
     private boolean aiPending = false;
 
     // Async block placement queue to prevent server thread freezes
@@ -78,6 +80,10 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
             return switch (index) {
                 case 0 -> state;
                 case 1 -> progress;
+                case 2 -> diagnostics.parseStatusCode();
+                case 3 -> diagnostics.repairAttempted() ? 1 : 0;
+                case 4 -> diagnostics.fallbackReasonCode();
+                case 5 -> Math.min(BuilderRuntime.MAX_BLOCK_PLACEMENTS, diagnostics.placementCount());
                 default -> 0;
             };
         }
@@ -87,6 +93,34 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
             switch (index) {
                 case 0 -> state = value;
                 case 1 -> progress = value;
+                case 2 -> diagnostics = new BuilderDiagnostics(
+                        BuilderDiagnostics.statusFromCode(value),
+                        diagnostics.repairAttempted(),
+                        diagnostics.fallbackReason(),
+                        diagnostics.placementCount(),
+                        diagnostics.seed(),
+                        diagnostics.errorSummary());
+                case 3 -> diagnostics = new BuilderDiagnostics(
+                        diagnostics.parseStatus(),
+                        value != 0,
+                        diagnostics.fallbackReason(),
+                        diagnostics.placementCount(),
+                        diagnostics.seed(),
+                        diagnostics.errorSummary());
+                case 4 -> diagnostics = new BuilderDiagnostics(
+                        diagnostics.parseStatus(),
+                        diagnostics.repairAttempted(),
+                        BuilderDiagnostics.fallbackReasonFromCode(value),
+                        diagnostics.placementCount(),
+                        diagnostics.seed(),
+                        diagnostics.errorSummary());
+                case 5 -> diagnostics = new BuilderDiagnostics(
+                        diagnostics.parseStatus(),
+                        diagnostics.repairAttempted(),
+                        diagnostics.fallbackReason(),
+                        value,
+                        diagnostics.seed(),
+                        diagnostics.errorSummary());
                 default -> {
                 }
             }
@@ -94,7 +128,7 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
 
         @Override
         public int size() {
-            return 2;
+            return 6;
         }
     };
 
@@ -158,6 +192,12 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
         nbt.putString("Prompt", promptText);
         nbt.putString("Error", lastError);
         nbt.putString("BuildPlan", lastBuildPlan);
+        nbt.putString("DiagnosticsParse", diagnostics.parseStatus());
+        nbt.putBoolean("DiagnosticsRepair", diagnostics.repairAttempted());
+        nbt.putString("DiagnosticsFallback", diagnostics.fallbackReason());
+        nbt.putInt("DiagnosticsPlacements", diagnostics.placementCount());
+        nbt.putInt("DiagnosticsSeed", diagnostics.seed());
+        nbt.putString("DiagnosticsError", diagnostics.errorSummary());
         nbt.putLong("lastPromptTime", lastPromptTime);
     }
 
@@ -170,6 +210,15 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
         promptText = nbt.getString("Prompt");
         lastError = nbt.getString("Error");
         lastBuildPlan = nbt.getString("BuildPlan");
+        diagnostics = new BuilderDiagnostics(
+                nbt.getString("DiagnosticsParse").isBlank()
+                        ? BuilderDiagnostics.STATUS_IDLE
+                        : nbt.getString("DiagnosticsParse"),
+                nbt.getBoolean("DiagnosticsRepair"),
+                nbt.getString("DiagnosticsFallback"),
+                nbt.getInt("DiagnosticsPlacements"),
+                nbt.getInt("DiagnosticsSeed"),
+                nbt.getString("DiagnosticsError"));
         lastPromptTime = nbt.getLong("lastPromptTime");
         if (state == STATE_PROCESSING || state == STATE_BUILDING) {
             state = STATE_IDLE;
@@ -200,12 +249,13 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
         progress = 0;
         lastError = "";
         lastBuildPlan = "";
+        diagnostics = BuilderDiagnostics.idle();
         markDirty();
 
-        CompletableFuture.supplyAsync(() -> requestBuildResponse(promptText))
-                .thenAccept(response -> {
+        CompletableFuture.supplyAsync(() -> createBuildPlan(promptText))
+                .thenAccept(result -> {
                     if (world.getServer() != null) {
-                        world.getServer().execute(() -> executeBuildResponse(response, world));
+                        world.getServer().execute(() -> queueBuildResult(result, world));
                     }
                 });
     }
@@ -233,7 +283,9 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
         return summariseBuildPlan(lastBuildPlan);
     }
 
-    private String requestBuildResponse(String prompt) {
+    private BuilderBuildPlanner.BuildResult createBuildPlan(String prompt) {
+        int fallbackSeed = Objects.hash(prompt, getPos().getX(), getPos().getY(), getPos().getZ());
+
         OpenRouterClient.ChatResult result = OpenRouterClient.chat(
                 AlchemodInit.OPENROUTER_KEY,
                 new OpenRouterClient.ChatRequest(
@@ -243,50 +295,78 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
                         BuilderPromptFactory.buildSystemPrompt(),
                         BuilderPromptFactory.buildUserPrompt(prompt)));
 
-        if (result.isError()) {
-            AlchemodInit.LOG.error("[Builder] Request failed: {}", result.error());
-            return "ERROR:" + result.error();
-        }
+        String rawResponse = result.rawBody() != null ? result.rawBody() : result.content();
+        AlchemodInit.LOG.info("[Builder] Raw response:\n{}", rawResponse);
 
-        return result.content();
+        BuilderBuildPlanner.BuildResult planned = BuilderBuildPlanner.plan(
+                prompt,
+                result.content() != null ? result.content() : result.rawBody(),
+                result.error(),
+                fallbackSeed,
+                (systemPrompt, userPrompt) -> {
+                    AlchemodInit.LOG.info("[Builder] Attempting one DeepSeek repair retry.");
+                    OpenRouterClient.ChatResult repaired = OpenRouterClient.chat(
+                            AlchemodInit.OPENROUTER_KEY,
+                            new OpenRouterClient.ChatRequest(
+                                    AlchemodInit.CONFIG.builderModel(),
+                                    AlchemodInit.CONFIG.builderMaxTokens(),
+                                    AlchemodInit.CONFIG.builderTimeoutSeconds(),
+                                    systemPrompt,
+                                    userPrompt));
+                    String repairedRaw = repaired.rawBody() != null ? repaired.rawBody() : repaired.content();
+                    AlchemodInit.LOG.info("[Builder] Repaired response:\n{}", repairedRaw);
+                    return repaired;
+                });
+
+        if (planned.validationError() != null && !planned.validationError().isBlank()) {
+            AlchemodInit.LOG.warn("[Builder] Validation/fallback reason: {}", planned.validationError());
+        }
+        if (planned.program() != null) {
+            AlchemodInit.LOG.info("[Builder] Final code:\n{}", planned.program().code());
+        }
+        return planned;
     }
 
-    private void executeBuildResponse(String response, World world) {
+    private void queueBuildResult(BuilderBuildPlanner.BuildResult result, World world) {
         aiPending = false;
 
-        if (response == null || response.isBlank() || response.startsWith("ERROR:")) {
+        if (result == null || !result.ok()) {
             state = STATE_ERROR;
             progress = 0;
-            lastError = response == null ? "Unknown builder error" : response;
+            diagnostics = result != null ? result.diagnostics() : BuilderDiagnostics.failed(false, "Unknown builder error");
+            lastError = diagnostics.errorSummary().isBlank() ? "Unknown builder error" : diagnostics.errorSummary();
             markDirty();
             return;
         }
 
-        state = STATE_BUILDING;
-        progress = 10;
         completedPlacements = 0;
         totalPlacements = 0;
         placementQueue.clear();
-        markDirty();
 
         try {
-            BuilderProgram program = BuilderResponseParser.parse(response);
+            BuilderProgram program = result.program();
+            BuilderRuntime.PlacementPreview preview = result.preview();
             lastBuildPlan = program.buildPlan();
+            diagnostics = result.diagnostics();
 
             BlockPos origin = getPos().up();
-            int fallbackSeed = Objects.hash(promptText, getPos().getX(), getPos().getY(), getPos().getZ());
+            preflightWorldPlacements(world, origin, preview);
 
-            // Queue placements instead of executing immediately
-            BuilderRuntime.ExecutionResult result = BuilderRuntime.execute(program, fallbackSeed,
-                    (x, y, z, blockId) -> {
-                        placementQueue.offer(new PlacementTask(origin, x, y, z, blockId));
-                        totalPlacements++;
-                    });
+            for (BuilderRuntime.Placement placement : preview.placements()) {
+                placementQueue.offer(new PlacementTask(
+                        origin, placement.x(), placement.y(), placement.z(), placement.blockId()));
+            }
+
+            state = STATE_BUILDING;
+            progress = 10;
+            totalPlacements = preview.placementCount();
+            completedPlacements = 0;
 
             lastError = "";
 
-            AlchemodInit.LOG.info("[Builder] Queued {} placements for async execution (legacy={}, seed={})",
-                    result.placements(), result.legacyFallback(), result.seedUsed());
+            AlchemodInit.LOG.info("[Builder] Queued {} placements for async execution (legacy={}, seed={}, repair={}, status={})",
+                    preview.placementCount(), preview.legacyFallback(), preview.seedUsed(),
+                    diagnostics.repairAttempted(), diagnostics.parseStatus());
             if (!lastBuildPlan.isBlank()) {
                 AlchemodInit.LOG.info("[Builder] Plan:\n{}", lastBuildPlan);
             }
@@ -294,14 +374,15 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
             state = STATE_ERROR;
             progress = 0;
             lastError = e.getMessage();
+            diagnostics = BuilderDiagnostics.failed(result.diagnostics().repairAttempted(), e.getMessage());
             AlchemodInit.LOG.warn("[Builder] Failed build plan:\n{}", lastBuildPlan);
-            AlchemodInit.LOG.warn("[Builder] Failed code:\n{}", response);
+            AlchemodInit.LOG.warn("[Builder] Validation error: {}", e.getMessage());
         } catch (Exception e) {
             state = STATE_ERROR;
             progress = 0;
             lastError = e.getMessage();
+            diagnostics = BuilderDiagnostics.failed(result.diagnostics().repairAttempted(), e.getMessage());
             AlchemodInit.LOG.warn("[Builder] Failed build plan:\n{}", lastBuildPlan);
-            AlchemodInit.LOG.warn("[Builder] Failed code:\n{}", response);
             AlchemodInit.LOG.error("[Builder] Failed to execute structure code", e);
         }
 
@@ -312,6 +393,30 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
      * Record for a single block placement task in the async queue.
      */
     private record PlacementTask(BlockPos origin, int x, int y, int z, String blockId) {}
+
+    private void preflightWorldPlacements(World world, BlockPos origin, BuilderRuntime.PlacementPreview preview) {
+        if (preview == null || preview.placements().isEmpty()) {
+            throw new IllegalArgumentException("Builder preview produced no placements");
+        }
+
+        for (BuilderRuntime.Placement placement : preview.placements()) {
+            BlockPos target = origin.add(placement.x(), placement.y(), placement.z());
+            if (!world.isInBuildLimit(target)) {
+                throw new IllegalArgumentException("Generated structure exceeded world build limits");
+            }
+
+            Identifier identifier = Identifier.of(placement.blockId());
+            if (!Registries.BLOCK.containsId(identifier)) {
+                throw new IllegalArgumentException("Unknown block id: " + placement.blockId());
+            }
+
+            Block block = Registries.BLOCK.get(identifier);
+            BlockState blockState = block.getDefaultState();
+            if (!blockState.getFluidState().isEmpty() || blockState.hasBlockEntity()) {
+                throw new IllegalArgumentException("Builder runtime rejected unsafe block " + placement.blockId());
+            }
+        }
+    }
 
     private void placeRelativeBlock(World world, BlockPos origin, int x, int y, int z, String blockId) {
         BlockPos target = origin.add(x, y, z);
@@ -434,6 +539,10 @@ public class BuilderBlockEntity extends BlockEntity implements NamedScreenHandle
 
     public String getError() {
         return lastError;
+    }
+
+    public BuilderDiagnostics getDiagnostics() {
+        return diagnostics;
     }
 
     public PropertyDelegate getDelegate() {

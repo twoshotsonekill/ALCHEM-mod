@@ -12,7 +12,7 @@ public final class BuilderPromptFactory {
         return """
 You are a competitive Minecraft structure designer creating a judge-facing voxel landmark.
 Return ONLY valid JSON with this exact shape:
-{"tool":"voxel.exec","input":{"palette":"simple_v1","seed":123,"bounds":{"x":[-64,64],"y":[-8,72],"z":[-64,64]},"build_plan":"plain-text structural plan","code":"JavaScript using block/box/line/sphere/rng"}}
+{"tool":"voxel.exec","input":{"palette":"simple_v1","seed":123,"bounds":{"x":[-64,64],"y":[-8,72],"z":[-64,64]},"build_plan":"plain-text structural plan","code":"JavaScript using block/box/line/sphere/hollowBox/cylinder/dome/pillar/stairs/rng"}}
 
 Design priorities:
 - Make the structure instantly recognizable without being told what it is.
@@ -26,8 +26,14 @@ CRITICAL - STRICT FUNCTION SIGNATURES (these will crash if wrong):
 - box(x1, y1, z1, x2, y2, z2, "blockname") - filled box from x1,y1,z1 to x2,y2,z2
 - line(x1, y1, z1, x2, y2, z2, "blockname") - line from point to point
 - sphere(centerX, centerY, centerZ, radius, "blockname") - hollow sphere shell
+- hollowBox(x1, y1, z1, x2, y2, z2, "blockname") - hollow rectangular shell
+- cylinder(centerX, baseY, centerZ, radius, height, "blockname") - solid vertical cylinder
+- dome(centerX, baseY, centerZ, radius, "blockname") - upper hemisphere shell
+- pillar(x, y, z, height, "blockname") - vertical support
+- stairs(x, y, z, steps, "direction", "blockname") or stairs(x, y, z, width, steps, "direction", "blockname")
+  direction is "north", "south", "east", or "west"
 - rng() - returns random number 0-1, use Math.floor(rng() * range) + min for integers
-- NO other functions exist. Do NOT use noise, trigonometry, or array access.
+- NO other functions exist. Do NOT use noise, trigonometry, arrays, objects, or block states.
 
 Execution contract:
 - Coordinates are relative to the builder block.
@@ -40,16 +46,47 @@ Execution contract:
    ether_crystal = semi-transparent glowing cyan crystal, glowstone_bricks = glowing brick,
    reinforced_obsidian = blast-resistant dark block, alchemical_glass = magical tinted glass)
 - Use build_plan for an inspectable structural summary only. Do not include hidden reasoning, chain-of-thought, XML tags, or markdown fences.
-- The code must be SIMPLE JavaScript - no const/let/var declarations, no arrays, no objects, no loops with complex logic.
-- Use simple function calls only: block(), box(), line(), sphere(), rng(), Math.floor(), Math.min(), Math.max(), Math.abs().
+- The code must be SIMPLE JavaScript. Simple for loops are allowed for repeated columns, windows, lights, ribs, battlements, and supports.
+- Avoid declaring helper functions. Avoid arrays and objects. Use numeric variables only when needed.
+- Use these functions only: block(), box(), line(), sphere(), hollowBox(), cylinder(), dome(), pillar(), stairs(), rng(), Math.floor(), Math.min(), Math.max(), Math.abs().
 - Leave empty space by omitting placements. There is no air block.
+- Minimum quality target: use at least two different shape helpers and usually 320+ placements.
 - Prefer large, articulated scenes that still respect the safe bounds and budget.
-- Example GOOD code: box(-10, 0, -10, 10, 20, 10, "stone"); sphere(0, 10, 0, 5, "alchemod:arcane_bricks"); line(-20, 5, 0, 20, 5, 0, "oak_planks");
+- Example GOOD code: hollowBox(-10, 0, -10, 10, 20, 10, "stone"); cylinder(-14,0,-14,4,24,"stone_bricks"); dome(0,20,0,8,"alchemod:alchemical_glass"); line(-20, 5, 0, 20, 5, 0, "oak_planks");
 - Example BAD code: sphere("stone", tx, baseY+2, z, r) - WRONG ORDER! (block name must be LAST)
 """.formatted(vanillaPalette, alchemodPalette);
     }
 
     public static String buildUserPrompt(String prompt) {
         return "Design an ambitious Minecraft build for this request: " + prompt;
+    }
+
+    public static String buildRepairSystemPrompt() {
+        return """
+You repair Minecraft World Sketcher responses.
+Return ONLY valid JSON with the exact voxel.exec schema. Do not include markdown.
+Keep palette simple_v1 and bounds exactly {"x":[-64,64],"y":[-8,72],"z":[-64,64]}.
+Use only safe helper calls: block, box, line, sphere, hollowBox, cylinder, dome, pillar, stairs, rng, Math.floor, Math.min, Math.max, Math.abs.
+Make the repaired build bigger and more varied than the failed output: at least two shape helpers and at least 320 placements.
+Block names always go last in helper calls.
+""";
+    }
+
+    public static String buildRepairUserPrompt(String prompt, String rawResponse, String error) {
+        return """
+Original user build request:
+%s
+
+Validation error:
+%s
+
+Broken response:
+%s
+
+Repair it into one valid voxel.exec JSON object.
+""".formatted(
+                prompt == null ? "" : prompt,
+                BuilderDiagnostics.shortError(error),
+                rawResponse == null ? "" : rawResponse);
     }
 }

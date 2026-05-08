@@ -91,9 +91,6 @@ public final class RuntimeTextureManager {
         int uid = resolveUid(stack, tag);
         Identifier loaded = LOADED.get(uid);
         if (loaded != null) {
-            if (!AI_READY.contains(uid)) {
-                maybeQueueAiUpgrade(uid, tag.getString("creator_sprite"));
-            }
             return loaded;
         }
 
@@ -111,7 +108,7 @@ public final class RuntimeTextureManager {
 
         Identifier textureId = registerTexture(uid, buildFallbackTexture(tag, uid));
         LOADED.put(uid, textureId);
-        maybeQueueAiUpgrade(uid, tag.getString("creator_sprite"));
+        AI_READY.add(uid);
         return textureId;
     }
 
@@ -200,12 +197,14 @@ public final class RuntimeTextureManager {
     }
 
     private static NativeImage buildFallbackTexture(NbtCompound tag, int uid) {
-        int primary = extractInputColor(tag.getString("creator_input_a"), 0xFF8844AA);
-        int secondary = extractInputColor(tag.getString("creator_input_b"), 0xFF4422AA);
-        if (primary == secondary) {
-            secondary = mix(primary, 0xFFFFFFFF, 0.35f);
-        }
-        return buildGlyphTexture(primary, secondary, getRarityColor(normalise(tag.getString("creator_rarity"))), uid);
+        return ProceduralSpriteGenerator.generate(
+                tag.getString("creator_item_type"),
+                tag.getString("creator_rarity"),
+                tag.getString("creator_name"),
+                tag.getString("creator_effects"),
+                tag.getString("creator_input_a"),
+                tag.getString("creator_input_b"),
+                uid);
     }
 
     private static int extractInputColor(String rawId, int fallback) {
@@ -274,7 +273,7 @@ public final class RuntimeTextureManager {
         return value == null ? "" : value.toLowerCase().replace("minecraft:", "").trim();
     }
 
-    private static int resolveUid(ItemStack stack, NbtCompound tag) {
+    public static int resolveUid(ItemStack stack, NbtCompound tag) {
         if (tag.contains("creator_slot")) {
             return tag.getInt("creator_slot");
         }

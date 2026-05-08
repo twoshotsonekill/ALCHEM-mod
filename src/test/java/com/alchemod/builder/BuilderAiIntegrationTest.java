@@ -364,6 +364,7 @@ class BuilderAiIntegrationTest {
     void configDefaultsAreValid() {
         assertEquals("deepseek/deepseek-v4-pro", AlchemodConfig.DEFAULT_BUILDER_MODEL);
         assertEquals("deepseek/deepseek-v4-pro", AlchemodConfig.DEFAULT_CREATOR_MODEL);
+        assertEquals("deepseek/deepseek-v4-pro", AlchemodConfig.DEFAULT_FORGE_MODEL);
         assertTrue(AlchemodConfig.DEFAULT_BUILDER_MAX_TOKENS > 0);
     }
 }

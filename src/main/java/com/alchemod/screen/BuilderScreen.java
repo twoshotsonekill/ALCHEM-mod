@@ -1,6 +1,7 @@
 package com.alchemod.screen;
 
 import com.alchemod.block.BuilderBlockEntity;
+import com.alchemod.builder.BuilderDiagnostics;
 import com.alchemod.network.BuilderPromptPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.DrawContext;
@@ -91,7 +92,43 @@ public class BuilderScreen extends HandledScreen<BuilderScreenHandler> {
         int statusX = (backgroundWidth - textRenderer.getWidth(status)) / 2;
         context.drawText(textRenderer, status, statusX, 63, statusColor, false);
 
+        String debug = diagnosticsText();
+        if (!debug.isBlank()) {
+            int debugX = Math.max(8, (backgroundWidth - textRenderer.getWidth(debug)) / 2);
+            context.drawText(textRenderer, debug, debugX, 72, 0xA7F3D0, false);
+        }
+
         context.drawText(textRenderer, "Prompt", 8, 12, 0xCBD5E1, false);
+    }
+
+    private String diagnosticsText() {
+        String status = BuilderDiagnostics.statusFromCode(handler.getDiagnosticStatus());
+        if (BuilderDiagnostics.STATUS_IDLE.equals(status)) {
+            return "";
+        }
+        StringBuilder text = new StringBuilder(status);
+        if (handler.wasRepairAttempted()) {
+            text.append(" repair");
+        }
+        if (handler.getPlacementCount() > 0) {
+            text.append(" ").append(handler.getPlacementCount()).append(" blocks");
+        }
+        String reason = BuilderDiagnostics.fallbackReasonFromCode(handler.getFallbackReasonCode());
+        if (!reason.isBlank()) {
+            text.append(" fallback: ").append(reason);
+        }
+        return trimToWidth(text.toString(), 154);
+    }
+
+    private String trimToWidth(String text, int maxWidth) {
+        if (textRenderer.getWidth(text) <= maxWidth) {
+            return text;
+        }
+        String trimmed = text;
+        while (trimmed.length() > 3 && textRenderer.getWidth(trimmed + "...") > maxWidth) {
+            trimmed = trimmed.substring(0, trimmed.length() - 1);
+        }
+        return trimmed + "...";
     }
 
     private void sendPrompt() {

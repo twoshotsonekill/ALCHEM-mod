@@ -41,7 +41,7 @@ public class BuilderScreenHandler extends ScreenHandler {
     }
 
     public BuilderScreenHandler(int syncId, PlayerInventory playerInventory) {
-        this(syncId, playerInventory, new SimpleInventory(2), new ArrayPropertyDelegate(2), null);
+        this(syncId, playerInventory, new SimpleInventory(2), new ArrayPropertyDelegate(6), null);
     }
 
     @Override
@@ -60,6 +60,22 @@ public class BuilderScreenHandler extends ScreenHandler {
 
     public int getProgress() {
         return propertyDelegate.get(1);
+    }
+
+    public int getDiagnosticStatus() {
+        return propertyDelegate.size() > 2 ? propertyDelegate.get(2) : 0;
+    }
+
+    public boolean wasRepairAttempted() {
+        return propertyDelegate.size() > 3 && propertyDelegate.get(3) != 0;
+    }
+
+    public int getFallbackReasonCode() {
+        return propertyDelegate.size() > 4 ? propertyDelegate.get(4) : 0;
+    }
+
+    public int getPlacementCount() {
+        return propertyDelegate.size() > 5 ? propertyDelegate.get(5) : 0;
     }
 
     public BlockPos getBlockPos() {

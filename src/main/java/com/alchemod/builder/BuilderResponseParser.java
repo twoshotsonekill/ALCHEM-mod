@@ -1,5 +1,6 @@
 package com.alchemod.builder;
 
+import com.alchemod.ai.OpenRouterClient;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -17,6 +18,10 @@ public final class BuilderResponseParser {
 
         if (jsonBody != null) {
             try {
+                String extractedContent = OpenRouterClient.extractContent(jsonBody);
+                if (extractedContent != null && !extractedContent.equals(jsonBody)) {
+                    return parse(extractedContent);
+                }
                 return parseStructuredJson(jsonBody);
             } catch (JsonSyntaxException e) {
                 BuilderProgram fallback = tryLegacyFallback(cleaned);

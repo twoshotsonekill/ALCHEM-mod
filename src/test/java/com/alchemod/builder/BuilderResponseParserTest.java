@@ -53,6 +53,25 @@ class BuilderResponseParserTest {
     }
 
     @Test
+    void parsesOpenRouterStyleWrappedResponse() {
+        BuilderProgram program = BuilderResponseParser.parse("""
+                {
+                  "choices": [
+                    {
+                      "message": {
+                        "content": "{\\"tool\\":\\"voxel.exec\\",\\"input\\":{\\"palette\\":\\"simple_v1\\",\\"seed\\":88,\\"bounds\\":{\\"x\\":[-64,64],\\"y\\":[-8,72],\\"z\\":[-64,64]},\\"build_plan\\":\\"Wrapped response.\\",\\"code\\":\\"box(0,0,0,8,8,8,'stone');\\"}}"
+                      }
+                    }
+                  ]
+                }
+                """);
+
+        assertFalse(program.legacyFallback());
+        assertEquals(88L, program.seed());
+        assertEquals("Wrapped response.", program.buildPlan());
+    }
+
+    @Test
     void rejectsMissingTool() {
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> BuilderResponseParser.parse("""
                 {
