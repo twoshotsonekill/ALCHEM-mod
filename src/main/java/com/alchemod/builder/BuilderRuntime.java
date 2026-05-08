@@ -26,8 +26,12 @@ public final class BuilderRuntime {
     public static final int MAX_CYLINDER_RADIUS = 16;
     public static final int MAX_HELPER_SPAN = 80;
     public static final int INSTRUCTION_BUDGET = 1_500_000;
-    public static final int MIN_QUALITY_PLACEMENTS = 320;
-    public static final int MIN_QUALITY_SHAPE_VARIETY = 2;
+    public static final int MIN_QUALITY_PLACEMENTS = 900;
+    public static final int MIN_QUALITY_SHAPE_VARIETY = 3;
+    public static final int MIN_QUALITY_UNIQUE_BLOCKS = 3;
+    public static final int MIN_QUALITY_MAJOR_HORIZONTAL_SPAN = 12;
+    public static final int MIN_QUALITY_DEPTH_SPAN = 5;
+    public static final int MIN_QUALITY_HEIGHT_SPAN = 6;
 
     public static final List<String> SIMPLE_PALETTE_BLOCKS = List.of(
             "stone", "cobblestone", "stone_bricks", "cracked_stone_bricks", "mossy_stone_bricks",
@@ -125,6 +129,20 @@ public final class BuilderRuntime {
         }
         if (preview.primitiveVariety() < MIN_QUALITY_SHAPE_VARIETY) {
             return QualityReport.rejected("too little shape variety: " + preview.primitiveVariety());
+        }
+        if (preview.uniqueBlockCount() < MIN_QUALITY_UNIQUE_BLOCKS) {
+            return QualityReport.rejected("too few materials: " + preview.uniqueBlockCount());
+        }
+
+        SpatialFootprint footprint = SpatialFootprint.from(preview.placements());
+        if (footprint.majorHorizontalSpan() < MIN_QUALITY_MAJOR_HORIZONTAL_SPAN) {
+            return QualityReport.rejected("too little horizontal scale: " + footprint.majorHorizontalSpan());
+        }
+        if (footprint.depthSpan() < MIN_QUALITY_DEPTH_SPAN) {
+            return QualityReport.rejected("too little 3D depth: " + footprint.depthSpan());
+        }
+        if (footprint.heightSpan() < MIN_QUALITY_HEIGHT_SPAN) {
+            return QualityReport.rejected("too little height variation: " + footprint.heightSpan());
         }
         return QualityReport.pass();
     }
@@ -656,6 +674,43 @@ public final class BuilderRuntime {
 
         public static QualityReport rejected(String reason) {
             return new QualityReport(false, reason);
+        }
+    }
+
+    private record SpatialFootprint(int xSpan, int ySpan, int zSpan) {
+        static SpatialFootprint from(List<Placement> placements) {
+            int minX = Integer.MAX_VALUE;
+            int maxX = Integer.MIN_VALUE;
+            int minY = Integer.MAX_VALUE;
+            int maxY = Integer.MIN_VALUE;
+            int minZ = Integer.MAX_VALUE;
+            int maxZ = Integer.MIN_VALUE;
+
+            for (Placement placement : placements) {
+                minX = Math.min(minX, placement.x());
+                maxX = Math.max(maxX, placement.x());
+                minY = Math.min(minY, placement.y());
+                maxY = Math.max(maxY, placement.y());
+                minZ = Math.min(minZ, placement.z());
+                maxZ = Math.max(maxZ, placement.z());
+            }
+
+            if (placements.isEmpty()) {
+                return new SpatialFootprint(0, 0, 0);
+            }
+            return new SpatialFootprint(maxX - minX, maxY - minY, maxZ - minZ);
+        }
+
+        int majorHorizontalSpan() {
+            return Math.max(xSpan, zSpan);
+        }
+
+        int depthSpan() {
+            return Math.min(xSpan, zSpan);
+        }
+
+        int heightSpan() {
+            return ySpan;
         }
     }
 

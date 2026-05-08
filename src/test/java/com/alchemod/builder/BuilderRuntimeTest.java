@@ -104,13 +104,42 @@ class BuilderRuntimeTest {
     }
 
     @Test
+    void qualityGateRejectsFlatDecoratedWalls() {
+        BuilderRuntime.PlacementPreview preview = BuilderRuntime.preview(program("""
+                box(-40, 0, 0, 40, 20, 0, 'stone_bricks');
+                line(-40, 21, 0, 40, 21, 0, 'oak_log');
+                for (i = -4; i <= 4; i = i + 1) { pillar(i * 8, 0, 0, 22, 'glass'); }
+                """, 1), 0);
+
+        BuilderRuntime.QualityReport quality = BuilderRuntime.assessQuality(preview);
+
+        assertFalse(quality.accepted());
+        assertTrue(quality.reason().contains("3D depth"));
+    }
+
+    @Test
+    void qualityGateRequiresMaterialVariety() {
+        BuilderRuntime.PlacementPreview preview = BuilderRuntime.preview(program("""
+                hollowBox(-10, 0, -10, 10, 20, 10, 'stone_bricks');
+                dome(0, 20, 0, 8, 'stone_bricks');
+                pillar(-14, 0, -14, 24, 'stone_bricks');
+                """, 1), 0);
+
+        BuilderRuntime.QualityReport quality = BuilderRuntime.assessQuality(preview);
+
+        assertFalse(quality.accepted());
+        assertTrue(quality.reason().contains("materials"));
+    }
+
+    @Test
     void deterministicLocalFallbackPassesQualityGate() {
         BuilderProgram fallback = BuilderLocalFallback.create("arcane observatory", 123, "test");
         BuilderRuntime.PlacementPreview preview = BuilderRuntime.preview(fallback, 0);
 
         assertTrue(BuilderRuntime.assessQuality(preview).accepted());
         assertTrue(preview.placementCount() > 1000);
-        assertTrue(preview.primitiveVariety() >= 2);
+        assertTrue(preview.primitiveVariety() >= 3);
+        assertTrue(preview.uniqueBlockCount() >= 3);
     }
 
     private static BuilderProgram program(String code, long seed) {

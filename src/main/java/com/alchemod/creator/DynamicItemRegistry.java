@@ -21,7 +21,7 @@ public final class DynamicItemRegistry {
 
     public static final int POOL_SIZE = 64;
 
-    /** The single NBT-driven item used for all new creations. */
+    /** Legacy NBT-driven item retained for existing worlds; new creation requires runtime injection. */
     public static OddityItem ODDITY_ITEM = null;
 
     private static final List<DynamicItem> POOL = new ArrayList<>();
@@ -33,15 +33,15 @@ public final class DynamicItemRegistry {
     private DynamicItemRegistry() {
     }
 
-    /** Registers the single {@link OddityItem}. Called from {@link AlchemodInit}. */
+    /** Registers the legacy {@link OddityItem}. Called from {@link AlchemodInit}. */
     public static void registerOddity(OddityItem item) {
         ODDITY_ITEM = item;
     }
 
     /**
-     * Registers the legacy 64-slot {@link DynamicItem} pool.  These exist for
-     * backward compatibility with items already in player inventories or world
-     * storage.  New creations go to {@link #ODDITY_ITEM} instead.
+     * Registers the legacy 64-slot {@link DynamicItem} pool. These exist only
+     * for backward compatibility with items already in player inventories or
+     * world storage. New creations require {@link #tryRegisterRuntimeItem}.
      */
     public static void register() {
         for (int index = 0; index < POOL_SIZE; index++) {
@@ -105,7 +105,7 @@ public final class DynamicItemRegistry {
             AlchemodInit.LOG.warn("[Creator] Runtime item injection succeeded for {}. This is unsafe and may not survive registry reloads.", id);
             return RuntimeItemResult.success(item, id);
         } catch (Throwable t) {
-            AlchemodInit.LOG.warn("[Creator] Runtime item injection failed for {}: {}. Falling back to template item.",
+            AlchemodInit.LOG.warn("[Creator] Runtime item injection failed for {}: {}.",
                     id, t.getMessage());
             return RuntimeItemResult.failure(t.getMessage());
         }
@@ -179,6 +179,7 @@ public final class DynamicItemRegistry {
                 case "sword"     -> "§7Melee Weapon";
                 case "totem"     -> "§7Passive Totem";
                 case "throwable" -> "§7Throwable";
+                case "block"     -> "§7Generated Block";
                 default          -> "§7Use Item";
             };
         }
@@ -244,6 +245,7 @@ public final class DynamicItemRegistry {
         return switch (normaliseType(itemType)) {
             case "potion", "wand", "charm", "scroll", "artifact", "spawn_item", "spawn_egg", "totem" -> 1;
             case "throwable", "food" -> 16;
+            case "block" -> 8;
             default -> 1;
         };
     }

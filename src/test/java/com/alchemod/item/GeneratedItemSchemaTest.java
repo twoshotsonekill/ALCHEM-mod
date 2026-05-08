@@ -21,6 +21,7 @@ class GeneratedItemSchemaTest {
         assertTrue(DynamicItemRegistry.CreatedItemMeta.staticItemTypeLabel("throwable").contains("Throwable"));
         assertTrue(DynamicItemRegistry.CreatedItemMeta.staticItemTypeLabel("spawn_item").contains("Spawn"));
         assertTrue(DynamicItemRegistry.CreatedItemMeta.staticItemTypeLabel("artifact").contains("Artifact"));
+        assertTrue(DynamicItemRegistry.CreatedItemMeta.staticItemTypeLabel("block").contains("Block"));
     }
 
     @Test

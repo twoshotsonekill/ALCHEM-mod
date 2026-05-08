@@ -3,9 +3,7 @@ package com.alchemod.block;
 import com.alchemod.AlchemodInit;
 import com.alchemod.ai.OpenRouterClient;
 import com.alchemod.ai.SpriteToolClient;
-import com.alchemod.creator.DynamicItem;
 import com.alchemod.creator.DynamicItemRegistry;
-import com.alchemod.item.OddityItem;
 import com.alchemod.screen.CreatorScreenHandler;
 import com.alchemod.util.JsonParsingUtils;
 import com.google.gson.JsonArray;
@@ -66,7 +64,7 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
 
     private static final Set<String> VALID_ITEM_TYPES = Set.of(
             "use_item", "artifact", "tool", "potion", "weapon", "sword", "bow", "wand",
-            "charm", "scroll", "throwable", "spawn_item", "spawn_egg", "food", "totem");
+            "charm", "scroll", "throwable", "spawn_item", "spawn_egg", "food", "totem", "block");
 
     private static final Set<String> VALID_MOBS = Set.of(
             "zombie", "skeleton", "creeper", "spider", "enderman", "blaze", "witch",
@@ -137,6 +135,7 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
     // ── AI request ────────────────────────────────────────────────────────────
 
     private CreationResult queryOpenRouter(String itemA, String itemB) {
+        CreatorFusionRules.Fusion fusion = CreatorFusionRules.match(itemA, itemB);
         OpenRouterClient.ChatResult result = OpenRouterClient.chat(
                 AlchemodInit.OPENROUTER_KEY,
                 new OpenRouterClient.ChatRequest(
@@ -144,20 +143,39 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
                         AlchemodInit.CONFIG.creatorMaxTokensScripted(),
                         AlchemodInit.CONFIG.creatorTimeoutSeconds(),
                         buildSystemPrompt(),
-                        "Create a new magical item by combining: " + itemA + " + " + itemB));
+                        buildUserPrompt(itemA, itemB, fusion)));
 
         if (result.isError()) {
             AlchemodInit.LOG.error("[Creator] API error: {}", result.error());
+            if (fusion != null) {
+                AlchemodInit.LOG.warn("[Creator] API failed; using local semantic fusion recipe for {} + {}.", itemA, itemB);
+                return creationFromFusion(fusion, null);
+            }
             return CreationResult.error(result.error());
         }
 
         CreationResult metadata = parseCreationResult(
                 result.rawBody() != null ? result.rawBody() : result.content());
-        if (metadata.error() != null) return metadata;
+        if (metadata.error() != null) {
+            if (fusion != null) {
+                AlchemodInit.LOG.warn("[Creator] AI parse failed; using local semantic fusion recipe for {} + {}.", itemA, itemB);
+                return creationFromFusion(fusion, null);
+            }
+            return metadata;
+        }
+
+        boolean semanticFusionApplied = false;
+        if (fusion != null) {
+            semanticFusionApplied = true;
+            String spriteCommands = metadata.spriteCommands();
+            metadata = creationFromFusion(fusion, spriteCommands);
+            AlchemodInit.LOG.info("[Creator] Applied semantic fusion recipe: {} + {} -> {}.",
+                    itemA, itemB, metadata.name());
+        }
 
         // Use inline sprite_commands when present; fall back to SpriteToolClient.
         String spriteCommands = metadata.spriteCommands();
-        if (spriteCommands == null || spriteCommands.isBlank()) {
+        if ((spriteCommands == null || spriteCommands.isBlank()) && !semanticFusionApplied) {
             AlchemodInit.LOG.info("[Creator] No inline sprite_commands for '{}', trying SpriteToolClient.", metadata.name());
             try {
                 spriteCommands = SpriteToolClient.generateSprite(
@@ -182,11 +200,38 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
                 spriteCommands, null);
     }
 
+    private String buildUserPrompt(String itemA, String itemB, CreatorFusionRules.Fusion fusion) {
+        String prompt = "Create a new magical item by combining: " + itemA + " + " + itemB + "\n"
+                + "Use obvious ingredient logic before random whimsy: carry the function of each input into the output.\n"
+                + "Examples: TNT + Bow should become Explosive Bow with an explosion-on-shot ability; Dirt + Iron should become Landmine Block with a trap/detonation ability.\n"
+                + "The item must have a concrete active special ability implemented in behavior_script.";
+        if (fusion != null) {
+            prompt += "\nThis pair has a clear recipe target: make " + fusion.name()
+                    + " as " + fusion.itemType() + " with special=" + fusion.special() + ".";
+        }
+        return prompt;
+    }
+
+    private CreationResult creationFromFusion(CreatorFusionRules.Fusion fusion, String spriteCommands) {
+        return new CreationResult(
+                fusion.name(),
+                fusion.description(),
+                fusion.spritePrompt(),
+                fusion.rarity(),
+                fusion.itemType(),
+                fusion.effects(),
+                fusion.special(),
+                fusion.mobType(),
+                fusion.behaviorScript(),
+                spriteCommands,
+                null);
+    }
+
     // ── System prompt ─────────────────────────────────────────────────────────
 
     private String buildSystemPrompt() {
         return
-            "You are a creative Minecraft alchemist inventing imaginative new items.\n"
+            "You are a creative Minecraft alchemist inventing singular, mechanically specific items.\n"
           + "Return ONLY a single valid JSON object — no markdown, no preamble, no trailing text.\n"
           + "\n"
           + "Required fields:\n"
@@ -195,7 +240,7 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
           + "  \"description\": \"One sentence flavour text.\",\n"
           + "  \"sprite_prompt\": \"8-15 word pixel art description of a concrete object\",\n"
           + "  \"rarity\": \"common|uncommon|rare|epic|legendary\",\n"
-          + "  \"item_type\": \"tool|potion|weapon|wand|charm|scroll|throwable|spawn_item|spawn_egg|artifact|use_item|bow|food|sword|totem\",\n"
+          + "  \"item_type\": \"tool|potion|weapon|wand|charm|scroll|throwable|spawn_item|spawn_egg|artifact|use_item|bow|food|sword|totem|block\",\n"
           + "  \"effects\": [\"speed\"],\n"
           + "  \"special\": \"ignite\",\n"
           + "  \"mob_type\": null,\n"
@@ -206,17 +251,22 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
           + "=== ITEM DESIGN ===\n"
           + "Valid effects: speed, strength, regeneration, resistance, fire_resistance, night_vision, absorption, luck, haste, jump_boost, slow_falling, water_breathing\n"
           + "Valid specials: ignite, knockback, heal_aura, launch, freeze, drain, phase, lightning, void_step\n"
-          + "Valid mob_type (spawn_egg only): zombie, skeleton, creeper, spider, enderman, blaze, witch, phantom, slime, magma_cube, hoglin, strider, cow, pig, sheep, chicken, bat, wolf, rabbit, fox, bee, axolotl, parrot\n"
+          + "Valid mob_type (spawn_item or spawn_egg only): zombie, skeleton, creeper, spider, enderman, blaze, witch, phantom, slime, magma_cube, hoglin, strider, cow, pig, sheep, chicken, bat, wolf, rabbit, fox, bee, axolotl, parrot\n"
           + "mob_type must be null unless item_type is spawn_item or spawn_egg. special must be null if no active ability.\n"
           + "common/uncommon: 0-2 effects; rare: 1-2; epic: 2-3; legendary: 3-4.\n"
           + "rare/epic/legendary should usually have a special.\n"
-          + "Avoid generic glowing gems. Prefer weird stuff: junk gadgets, cursed snacks, unstable bows, masks, jars, bombs, puppets, keys, horns, fake relics.\n"
+          + "Avoid generic glowing gems, Mysterious Relics, Arcane Orbs, and copy-paste adjectives.\n"
+          + "Prefer concrete odd props: junk gadgets, cursed snacks, unstable bows, cracked masks, sealed jars, suspicious bombs, puppets, bent keys, horns, receipts, bells, labels, tags, fake relics.\n"
+          + "The name should have a specific noun plus a material, flaw, owner, promise, or failure mode.\n"
+          + "Tie behavior to the object identity. A jar leaks, a mask lies, a key tugs, a snack bites back, a bell calls, a tag marks.\n"
+          + "When the ingredients imply an obvious fantasy item, use that directly: TNT + Bow -> Explosive Bow; Dirt + Iron -> Landmine Block.\n"
+          + "Block-style outputs are allowed with item_type=block; their scripts should place or affect blocks with world.setBlock and still do something special on use.\n"
           + "\n"
           + "behavior_script defines: function onUse(player, world) { ... }\n"
           + "API: player.heal/damage/addEffect/removeEffect/addVelocity/teleport/setOnFire/extinguish/sendMessage/getX/getY/getZ/getHealth/getLookDir/isSneaking/isInWater\n"
           + "     world.createExplosion/spawnLightning/spawnMob/playSound/setBlock/isDay/isRaining/getTime\n"
           + "     nearbyEntities(radius) array with .damage/.heal/.knockbackFrom/.setVelocity/.addEffect/.setOnFire/.extinguish/.getHealth/.getX/.getY/.getZ/.getType/.isPlayer/.isAlive\n"
-          + "Keep scripts under 20 lines. Always call player.sendMessage.\n"
+          + "Keep scripts under 20 lines. Always call player.sendMessage with unique flavour feedback, not generic text.\n"
           + "\n"
           + "=== SPRITE DESIGN (sprite_commands) ===\n"
           + "Paint a 16x16 Minecraft-style pixel art icon. Bold silhouette, 3-6 flat colours, no gradients.\n"
@@ -318,7 +368,7 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
           + "  Mask → wide short rect + pixel eyes.\n"
           + "  Horn → diagonal tapering rects (x1 shrinks each row).\n"
           + "  Coin → circle + 2 interior pixel markings.\n"
-          + "  If in doubt, use the ORB/GEM template with rarity accent colour.\n";
+          + "  If in doubt, choose a concrete prop silhouette like key, jar, mask, tag, folded note, bell, or cracked tool.\n";
     }
 
     // ── Parse metadata response ───────────────────────────────────────────────
@@ -331,11 +381,11 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
             if (jsonBody == null) return CreationResult.error("Could not parse AI response");
 
             JsonObject object = JsonParser.parseString(jsonBody).getAsJsonObject();
-            String name         = JsonParsingUtils.getString(object, "name",         "Mysterious Relic");
+            String name         = JsonParsingUtils.getString(object, "name",         "Unnamed Contraption");
             String description  = JsonParsingUtils.getString(object, "description",  "An enigmatic object of unknown power.");
-            String spritePrompt = JsonParsingUtils.getString(object, "sprite_prompt", name + " magical glowing artifact");
             String rarity       = JsonParsingUtils.normalise(JsonParsingUtils.getString(object, "rarity",    "common"));
             String itemType     = JsonParsingUtils.normalise(JsonParsingUtils.getString(object, "item_type", "use_item"));
+            String spritePrompt = JsonParsingUtils.getString(object, "sprite_prompt", fallbackSpritePrompt(name, itemType));
             List<String> effects = sanitiseEffects(JsonParsingUtils.getStringList(object, "effects"));
             String special      = sanitiseSpecial(JsonParsingUtils.getNullableString(object, "special"));
             String mobType      = sanitiseMobType(itemType, JsonParsingUtils.getNullableString(object, "mob_type"));
@@ -370,7 +420,7 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
             }
 
             if (special == null && Set.of("rare","epic","legendary").contains(rarity))
-                special = fallbackSpecial(!effects.isEmpty() ? effects.get(0) : "luck", itemType);
+                special = fallbackSpecial(name, !effects.isEmpty() ? effects.get(0) : "luck", itemType);
 
             if (behaviorScript == null || behaviorScript.isBlank())
                 behaviorScript = buildFallbackScript(name, rarity, itemType, effects, special, mobType);
@@ -415,33 +465,17 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
                 result.name(), result.description(), uid, result.rarity(), result.itemType(),
                 result.effects(), result.special(), result.mobType(), result.behaviorScript());
 
-        Item targetItem = null;
-        String runtimeItemId = "";
-        String injectionError = "";
         DynamicItemRegistry.RuntimeItemResult runtimeItem = DynamicItemRegistry.tryRegisterRuntimeItem(meta);
-        if (runtimeItem.succeeded()) {
-            targetItem = runtimeItem.item();
-            runtimeItemId = runtimeItem.id().toString();
-        } else {
-            injectionError = runtimeItem.error();
+        if (!runtimeItem.succeeded()) {
+            AlchemodInit.LOG.error("[Creator] Runtime item injection failed; creation aborted: {}",
+                    runtimeItem.error());
+            state = STATE_ERROR;
+            progress = 0;
+            markDirty();
+            return;
         }
-
-        if (targetItem == null && DynamicItemRegistry.ODDITY_ITEM != null) {
-            targetItem = DynamicItemRegistry.ODDITY_ITEM;
-        }
-
-        if (targetItem == null) {
-            DynamicItem dynamicItem = DynamicItemRegistry.claimSlot();
-            if (dynamicItem == null) {
-                AlchemodInit.LOG.error("[Creator] Both OddityItem and legacy slot pool are unavailable.");
-                state = STATE_ERROR; markDirty(); return;
-            }
-            uid = dynamicItem.getSlotIndex();
-            targetItem = dynamicItem;
-            DynamicItemRegistry.updateSlotMeta(uid, new DynamicItemRegistry.CreatedItemMeta(
-                    result.name(), result.description(), uid, result.rarity(), result.itemType(),
-                    result.effects(), result.special(), result.mobType(), result.behaviorScript()));
-        }
+        Item targetItem = runtimeItem.item();
+        String runtimeItemId = runtimeItem.id().toString();
 
         items.get(SLOT_A).decrement(1);
         items.get(SLOT_B).decrement(1);
@@ -463,7 +497,7 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
         tag.putString("creator_input_a",   inputIdA);
         tag.putString("creator_input_b",   inputIdB);
         tag.putString("creator_runtime_item", runtimeItemId);
-        tag.putString("creator_injection_error", injectionError);
+        tag.putString("creator_injection_mode", "runtime_registry");
         if (result.behaviorScript() != null && !result.behaviorScript().isBlank())
             tag.putString("creator_script", result.behaviorScript());
         if (result.spriteCommands() != null && !result.spriteCommands().isBlank())
@@ -478,7 +512,7 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
         AlchemodInit.LOG.info("[Creator] Created '{}' (uid=0x{}, sprite={}, rarity={}, type={}, runtime={})",
                 result.name(), Integer.toHexString(uid),
                 result.spriteCommands() != null ? "inline" : "none",
-                result.rarity(), result.itemType(), !runtimeItemId.isBlank() ? runtimeItemId : "template");
+                result.rarity(), result.itemType(), runtimeItemId);
         markDirty();
     }
 
@@ -532,13 +566,31 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
 
     // ── Fallback helpers ──────────────────────────────────────────────────────
 
-    private static String fallbackSpecial(String effect, String itemType) {
-        if ("bow".equals(itemType) || "weapon".equals(itemType) || "sword".equals(itemType)) return "ignite";
-        if ("throwable".equals(itemType) || "scroll".equals(itemType)) return "lightning";
-        if ("spawn_egg".equals(itemType) || "spawn_item".equals(itemType)) return "phase";
-        if ("wand".equals(itemType) || "artifact".equals(itemType)) return "drain";
-        if ("charm".equals(itemType) || "potion".equals(itemType)) return "heal_aura";
-        return switch (effect) {
+    private static String fallbackSpritePrompt(String name, String itemType) {
+        int seed = stableSeed(name, itemType, "sprite");
+        String material = pick(new String[] {
+                "iron-bound", "wax-sealed", "cracked glass", "stitched leather",
+                "burnt copper", "painted bone", "folded paper", "bottle-green"
+        }, seed);
+        String noun = switch (itemType) {
+            case "bow" -> pick(new String[] {"shortbow", "crooked bow", "stringed charm"}, seed >> 3);
+            case "weapon", "sword" -> pick(new String[] {"notched blade", "hook knife", "thin spear"}, seed >> 3);
+            case "tool" -> pick(new String[] {"hand tool", "bent hammer", "small pick"}, seed >> 3);
+            case "potion", "food" -> pick(new String[] {"sealed bottle", "bitten snack", "tiny flask"}, seed >> 3);
+            case "wand" -> pick(new String[] {"forked wand", "candle stick", "marked rod"}, seed >> 3);
+            case "charm", "totem" -> pick(new String[] {"hanging tag", "tiny mask", "square idol"}, seed >> 3);
+            case "scroll" -> pick(new String[] {"folded note", "bound receipt", "rolled map"}, seed >> 3);
+            case "throwable" -> pick(new String[] {"fused bomb", "glass pellet", "wrapped stone"}, seed >> 3);
+            case "spawn_item", "spawn_egg" -> pick(new String[] {"speckled egg", "warm shell", "marked capsule"}, seed >> 3);
+            case "block" -> pick(new String[] {"wired block", "trap cube", "pressure tile", "buried charge"}, seed >> 3);
+            default -> pick(new String[] {"jar", "key", "bell", "mask", "label", "coin"}, seed >> 3);
+        };
+        return "16x16 pixel art " + material + " " + noun + " for " + name;
+    }
+
+    private static String fallbackSpecial(String name, String effect, String itemType) {
+        int seed = stableSeed(name, effect, itemType, "special");
+        String effectChoice = switch (effect) {
             case "strength"        -> "knockback";
             case "speed"           -> "void_step";
             case "regeneration"    -> "heal_aura";
@@ -549,63 +601,194 @@ public class CreatorBlockEntity extends BlockEntity implements NamedScreenHandle
             case "haste"           -> "lightning";
             default                -> "drain";
         };
+        if ((seed & 3) == 0) return effectChoice;
+
+        String[] choices = switch (itemType) {
+            case "bow", "weapon", "sword" -> new String[] {"ignite", "knockback", "lightning", "drain"};
+            case "throwable" -> new String[] {"freeze", "ignite", "launch", "lightning"};
+            case "scroll" -> new String[] {"phase", "lightning", "void_step", "heal_aura"};
+            case "spawn_egg", "spawn_item" -> new String[] {"phase", "knockback", "heal_aura", "void_step"};
+            case "wand", "artifact", "use_item" -> new String[] {"drain", "phase", "void_step", "lightning", "launch"};
+            case "charm", "potion", "food", "totem" -> new String[] {"heal_aura", "phase", "freeze", "void_step"};
+            case "tool" -> new String[] {"knockback", "launch", "freeze", "drain"};
+            case "block" -> new String[] {"ignite", "knockback", "freeze", "launch"};
+            default -> new String[] {"drain", "phase", "launch", "freeze", "void_step"};
+        };
+        return pick(choices, seed >> 2);
     }
 
     private static String buildFallbackScript(String name, String rarity, String itemType,
             List<String> effects, String special, String mobType) {
+        int seed = stableSeed(name, rarity, itemType, String.join(",", effects),
+                special != null ? special : "", mobType != null ? mobType : "");
+        int flavor = Math.floorMod(seed, 5);
         int dur = switch (rarity) { case "uncommon"->240; case "rare"->320; case "epic"->420; case "legendary"->520; default->180; };
         int amp = switch (rarity) { case "rare"->1; case "epic","legendary"->2; default->0; };
+        boolean strong = Set.of("epic","legendary").contains(rarity);
         StringBuilder b = new StringBuilder("function onUse(player, world) {\n");
+        b.append("  var look = player.getLookDir();\n");
         for (String eff : effects)
             b.append("  player.addEffect('").append(eff).append("', ").append(dur).append(", ").append(amp).append(");\n");
 
-        switch (itemType) {
-            case "bow", "weapon", "sword" -> b.append("  var look = player.getLookDir();\n")
-                    .append("  world.createExplosion(player.getX()+look[0]*7, player.getY()+1.2+look[1]*4, player.getZ()+look[2]*7, ")
-                    .append(Set.of("epic","legendary").contains(rarity) ? "3.0" : "2.0").append(", false);\n")
-                    .append("  world.playSound('entity.firework_rocket.launch', 0.9, 0.8);\n");
-            case "throwable" -> b.append("  var look = player.getLookDir();\n")
-                    .append("  world.createExplosion(player.getX()+look[0]*5, player.getY()+1+look[1]*3, player.getZ()+look[2]*5, 1.6, false);\n")
-                    .append("  world.playSound('entity.snowball.throw', 0.9, 0.9);\n");
-            case "scroll" -> b.append("  var look = player.getLookDir();\n")
-                    .append("  world.spawnLightning(player.getX()+look[0]*8, player.getY()+look[1]*4, player.getZ()+look[2]*8);\n")
-                    .append("  world.playSound('item.book.page_turn', 0.8, 1.3);\n");
-            case "wand", "artifact", "use_item" -> b.append("  var look = player.getLookDir();\n")
-                    .append("  world.playSound('block.amethyst_block.chime', 0.8, 1.2);\n")
-                    .append("  player.addVelocity(look[0]*0.4, 0.25, look[2]*0.4);\n");
-            case "tool" -> b.append("  player.addEffect('haste', ").append(dur).append(", ").append(Math.max(1, amp)).append(");\n")
-                    .append("  world.playSound('block.anvil.use', 0.6, 1.4);\n");
-            case "potion" -> b.append("  player.heal(").append(Set.of("epic","legendary").contains(rarity)?"8":"4").append(");\n")
-                    .append("  world.playSound('entity.generic.drink', 0.7, 1.2);\n");
-            case "charm" -> b.append("  player.addEffect('resistance', ").append(dur).append(", ").append(Math.max(0, amp)).append(");\n")
-                    .append("  world.playSound('block.enchantment_table.use', 0.7, 1.1);\n");
-            case "spawn_egg", "spawn_item" -> { if (mobType!=null&&!mobType.isBlank())
-                    b.append("  var look = player.getLookDir();\n")
-                            .append("  world.spawnMob('").append(escape(mobType)).append("', player.getX()+look[0]*2, player.getY(), player.getZ()+look[2]*2);\n")
-                            .append("  world.playSound('entity.evoker.prepare_summon', 0.8, 1.1);\n"); }
-            case "food"  -> b.append("  player.heal(").append(Set.of("epic","legendary").contains(rarity)?"6":"3").append(");\n")
-                    .append("  world.playSound('entity.generic.eat', 0.7, 1.4);\n");
-            case "totem" -> b.append("  player.addEffect('absorption', 240, ").append(Set.of("epic","legendary").contains(rarity)?"1":"0").append(");\n")
-                    .append("  world.playSound('item.totem.use', 0.7, 1.1);\n");
-        }
+        appendTypeFallback(b, itemType, rarity, mobType, dur, amp, strong, flavor);
+        if (special != null) appendSpecialFallback(b, special, flavor);
 
-        if (special != null) switch (special) {
-            case "ignite"    -> b.append("  var t = nearbyEntities(6); for(var i=0;i<t.length;i++){t[i].setOnFire(6);}\n");
-            case "knockback" -> b.append("  var t = nearbyEntities(6); for(var i=0;i<t.length;i++){t[i].knockbackFrom(3);}\n");
-            case "heal_aura" -> b.append("  player.heal(6);\n");
-            case "launch"    -> b.append("  player.addVelocity(0, 1.2, 0);\n");
-            case "freeze"    -> b.append("  var t = nearbyEntities(7); for(var i=0;i<t.length;i++){t[i].addEffect('slowness',180,2);}\n");
-            case "drain"     -> b.append("  var t = nearbyEntities(7); for(var i=0;i<t.length;i++){t[i].damage(5);}\n  player.heal(4);\n");
-            case "phase"     -> b.append("  player.addEffect('invisibility', 160, 0);\n");
-            case "lightning" -> b.append("  var t = nearbyEntities(8); for(var i=0;i<t.length;i++){world.spawnLightning(t[i].getX(),t[i].getY(),t[i].getZ());}\n");
+        b.append("  player.sendMessage('").append(escape(fallbackUseMessage(name, itemType, special, flavor))).append("');\n");
+        b.append("}\n");
+        return b.toString();
+    }
+
+    private static void appendTypeFallback(StringBuilder b, String itemType, String rarity, String mobType,
+            int dur, int amp, boolean strong, int flavor) {
+        switch (itemType) {
+            case "bow", "weapon", "sword" -> {
+                switch (flavor) {
+                    case 0 -> b.append("  world.createExplosion(player.getX()+look[0]*7, player.getY()+1.2+look[1]*4, player.getZ()+look[2]*7, ")
+                            .append(strong ? "3.0" : "2.0").append(", false);\n")
+                            .append("  world.playSound('entity.firework_rocket.launch', 0.9, 0.8);\n");
+                    case 1 -> b.append("  var t = nearbyEntities(5); for(var i=0;i<t.length;i++){t[i].knockbackFrom(2.4);}\n")
+                            .append("  world.playSound('entity.player.attack.sweep', 0.8, 0.75);\n");
+                    case 2 -> b.append("  var t = nearbyEntities(4); for(var i=0;i<t.length;i++){t[i].setOnFire(4);}\n")
+                            .append("  player.addEffect('strength', ").append(dur / 2).append(", ").append(Math.max(0, amp)).append(");\n");
+                    case 3 -> b.append("  world.spawnLightning(player.getX()+look[0]*6, player.getY()+look[1]*3, player.getZ()+look[2]*6);\n")
+                            .append("  world.playSound('item.trident.thunder', 0.7, 1.4);\n");
+                    default -> b.append("  player.addVelocity(look[0]*0.7, 0.35, look[2]*0.7);\n")
+                            .append("  world.playSound('entity.arrow.shoot', 0.9, 1.6);\n");
+                }
+            }
+            case "throwable" -> {
+                switch (flavor) {
+                    case 0 -> b.append("  world.createExplosion(player.getX()+look[0]*5, player.getY()+1+look[1]*3, player.getZ()+look[2]*5, 1.6, false);\n")
+                            .append("  world.playSound('entity.snowball.throw', 0.9, 0.9);\n");
+                    case 1 -> b.append("  var t = nearbyEntities(6); for(var i=0;i<t.length;i++){t[i].addEffect('slowness',160,1);}\n")
+                            .append("  world.playSound('block.glass.break', 0.7, 1.5);\n");
+                    case 2 -> b.append("  world.spawnLightning(player.getX()+look[0]*5, player.getY()+look[1]*2, player.getZ()+look[2]*5);\n")
+                            .append("  world.playSound('entity.firework_rocket.blast', 0.8, 1.2);\n");
+                    case 3 -> b.append("  var t = nearbyEntities(5); for(var i=0;i<t.length;i++){t[i].damage(3); t[i].setOnFire(3);}\n")
+                            .append("  world.playSound('entity.blaze.shoot', 0.6, 1.7);\n");
+                    default -> b.append("  player.addVelocity(look[0]*-0.25, 0.35, look[2]*-0.25);\n")
+                            .append("  world.playSound('entity.egg.throw', 0.8, 0.7);\n");
+                }
+            }
+            case "scroll" -> {
+                switch (flavor) {
+                    case 0 -> b.append("  world.spawnLightning(player.getX()+look[0]*8, player.getY()+look[1]*4, player.getZ()+look[2]*8);\n");
+                    case 1 -> b.append("  player.addEffect('invisibility', 120, 0);\n  player.addEffect('night_vision', 220, 0);\n");
+                    case 2 -> b.append("  player.heal(").append(strong ? "7" : "4").append(");\n  player.addEffect('regeneration', 120, 0);\n");
+                    case 3 -> b.append("  var t = nearbyEntities(7); for(var i=0;i<t.length;i++){t[i].addEffect('slowness',180,2);}\n");
+                    default -> b.append("  player.addVelocity(0, 0.9, 0);\n  player.addEffect('slow_falling', 180, 0);\n");
+                }
+                b.append("  world.playSound('item.book.page_turn', 0.8, ").append(flavor == 0 ? "1.3" : "0.9").append(");\n");
+            }
+            case "wand", "artifact", "use_item" -> {
+                switch (flavor) {
+                    case 0 -> b.append("  player.addVelocity(look[0]*0.45, 0.25, look[2]*0.45);\n");
+                    case 1 -> b.append("  var t = nearbyEntities(6); for(var i=0;i<t.length;i++){t[i].damage(2);}\n  player.heal(2);\n");
+                    case 2 -> b.append("  player.addEffect('luck', ").append(dur).append(", 0);\n");
+                    case 3 -> b.append("  var t = nearbyEntities(5); for(var i=0;i<t.length;i++){t[i].knockbackFrom(1.8);}\n");
+                    default -> b.append("  player.addEffect('slow_falling', 160, 0);\n  player.addVelocity(0, 0.45, 0);\n");
+                }
+                b.append("  world.playSound('block.amethyst_block.chime', 0.8, ").append(1.0 + flavor * 0.08).append(");\n");
+            }
+            case "tool" -> b.append("  player.addEffect('haste', ").append(dur).append(", ").append(Math.max(1, amp)).append(");\n")
+                    .append(flavor % 2 == 0
+                            ? "  world.playSound('block.anvil.use', 0.6, 1.4);\n"
+                            : "  world.playSound('block.grindstone.use', 0.7, 0.9);\n");
+            case "potion" -> b.append("  player.heal(").append(strong ? "8" : "4").append(");\n")
+                    .append(flavor % 2 == 0
+                            ? "  player.addEffect('absorption', 180, 0);\n"
+                            : "  player.addEffect('luck', 240, 0);\n")
+                    .append("  world.playSound('entity.generic.drink', 0.7, ").append(flavor % 2 == 0 ? "1.2" : "0.75").append(");\n");
+            case "charm" -> b.append("  player.addEffect('resistance', ").append(dur).append(", ").append(Math.max(0, amp)).append(");\n")
+                    .append(flavor % 2 == 0
+                            ? "  player.heal(2);\n"
+                            : "  player.addEffect('slow_falling', 180, 0);\n")
+                    .append("  world.playSound('block.enchantment_table.use', 0.7, 1.1);\n");
+            case "spawn_egg", "spawn_item" -> {
+                if (mobType != null && !mobType.isBlank()) {
+                    b.append("  world.spawnMob('").append(escape(mobType)).append("', player.getX()+look[0]*2, player.getY(), player.getZ()+look[2]*2);\n")
+                            .append(flavor % 2 == 0
+                                    ? "  world.playSound('entity.evoker.prepare_summon', 0.8, 1.1);\n"
+                                    : "  world.playSound('block.scaffolding.break', 0.8, 0.8);\n");
+                }
+            }
+            case "food" -> b.append("  player.heal(").append(strong ? "6" : "3").append(");\n")
+                    .append(flavor % 2 == 0
+                            ? "  player.addEffect('speed', 120, 0);\n"
+                            : "  player.addEffect('luck', 180, 0);\n")
+                    .append("  world.playSound('entity.generic.eat', 0.7, 1.4);\n");
+            case "totem" -> b.append("  player.addEffect('absorption', 240, ").append(strong ? "1" : "0").append(");\n")
+                    .append(flavor % 2 == 0
+                            ? "  player.heal(4);\n"
+                            : "  player.addEffect('resistance', 160, 0);\n")
+                    .append("  world.playSound('item.totem.use', 0.7, 1.1);\n");
+            case "block" -> {
+                String placed = flavor % 2 == 0 ? "minecraft:iron_block" : "minecraft:stone_pressure_plate";
+                b.append("  var x = player.getX()+look[0]*2;\n")
+                        .append("  var y = player.getY()-1;\n")
+                        .append("  var z = player.getZ()+look[2]*2;\n")
+                        .append("  world.setBlock(x, y, z, '").append(placed).append("');\n")
+                        .append(flavor == 0
+                                ? "  world.createExplosion(x, y+1, z, 1.5, false);\n"
+                                : "  var t = nearbyEntities(4); for(var i=0;i<t.length;i++){t[i].addEffect('slowness',100,1);}\n")
+                        .append("  world.playSound('block.stone.place', 0.8, 0.8);\n");
+            }
+            default -> b.append("  world.playSound('block.note_block.chime', 0.7, 1.0);\n");
+        }
+    }
+
+    private static void appendSpecialFallback(StringBuilder b, String special, int flavor) {
+        switch (special) {
+            case "ignite" -> b.append("  var s = nearbyEntities(").append(flavor % 2 == 0 ? "6" : "4")
+                    .append("); for(var i=0;i<s.length;i++){s[i].setOnFire(").append(4 + flavor).append(");}\n");
+            case "knockback" -> b.append("  var s = nearbyEntities(6); for(var i=0;i<s.length;i++){s[i].knockbackFrom(")
+                    .append(flavor % 2 == 0 ? "3" : "1.8").append(");}\n");
+            case "heal_aura" -> b.append("  player.heal(").append(4 + flavor).append(");\n");
+            case "launch" -> b.append("  player.addVelocity(0, ").append(flavor % 2 == 0 ? "1.2" : "0.75").append(", 0);\n");
+            case "freeze" -> b.append("  var s = nearbyEntities(7); for(var i=0;i<s.length;i++){s[i].addEffect('slowness',")
+                    .append(140 + flavor * 20).append(",2);}\n");
+            case "drain" -> b.append("  var s = nearbyEntities(7); for(var i=0;i<s.length;i++){s[i].damage(")
+                    .append(3 + flavor).append(");}\n  player.heal(4);\n");
+            case "phase" -> b.append("  player.addEffect('invisibility', ").append(120 + flavor * 20).append(", 0);\n");
+            case "lightning" -> b.append("  var s = nearbyEntities(8); for(var i=0;i<s.length;i++){world.spawnLightning(s[i].getX(),s[i].getY(),s[i].getZ());}\n");
             case "void_step" -> b.append("  player.addEffect('slow_falling', 200, 0);\n  player.addVelocity(0, 0.8, 0);\n");
         }
+    }
 
-        if ("common".equals(rarity) && effects.isEmpty() && special==null && !"spawn_egg".equals(itemType))
-            b.append("  player.sendMessage('").append(escape(name)).append(" squeaks and does very little.');\n");
-        b.append("  player.sendMessage('").append(escape(name)).append(" does something strange.');\n");
-        b.append("  world.playSound('block.beacon.activate', 0.7, 1.2);\n}\n");
-        return b.toString();
+    private static String fallbackUseMessage(String name, String itemType, String special, int flavor) {
+        int seed = stableSeed(name, itemType, special != null ? special : "", Integer.toString(flavor));
+        String verb = switch (itemType) {
+            case "potion" -> pick(new String[] {"fizzes through the cork", "turns warm in your hand", "leaves a metallic aftertaste"}, seed);
+            case "food" -> pick(new String[] {"crumbles, then bites back", "tastes briefly impossible", "snaps like dry sugar"}, seed);
+            case "scroll" -> pick(new String[] {"rewrites one line of itself", "folds into a sharper shape", "whispers from the crease"}, seed);
+            case "wand" -> pick(new String[] {"clicks like a loose tooth", "draws a crooked spark", "points somewhere unhelpful"}, seed);
+            case "throwable" -> pick(new String[] {"ticks twice and commits", "bursts out of its wrapping", "spits a bright little warning"}, seed);
+            case "spawn_egg", "spawn_item" -> pick(new String[] {"taps from the inside", "rolls toward the nearest shadow", "answers with a tiny heartbeat"}, seed);
+            case "charm", "totem" -> pick(new String[] {"tightens its cord", "winks with painted eyes", "pulls the air into a knot"}, seed);
+            case "bow", "weapon", "sword" -> pick(new String[] {"rings down your arm", "leaves a hot notch in the air", "hums like it remembers"}, seed);
+            case "tool" -> pick(new String[] {"measures the world badly", "shaves a spark off the air", "finds a hidden angle"}, seed);
+            case "block" -> pick(new String[] {"locks into the ground", "arms itself with a heavy click", "marks the floor as dangerous"}, seed);
+            default -> pick(new String[] {"does one very specific wrong thing", "makes the room feel labelled", "clicks and refuses to explain"}, seed);
+        };
+        return name + " " + verb + ".";
+    }
+
+    private static String pick(String[] options, int seed) {
+        return options[Math.floorMod(seed, options.length)];
+    }
+
+    private static int stableSeed(String... parts) {
+        int hash = 0x811C9DC5;
+        for (String part : parts) {
+            String value = part == null ? "" : part;
+            for (int i = 0; i < value.length(); i++) {
+                hash ^= value.charAt(i);
+                hash *= 0x01000193;
+            }
+            hash ^= '|';
+            hash *= 0x01000193;
+        }
+        return hash;
     }
 
     private static String escape(String v) { return v.replace("\\","\\\\").replace("'","\\'"); }

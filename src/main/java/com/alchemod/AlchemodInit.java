@@ -72,7 +72,7 @@ public class AlchemodInit implements ModInitializer {
     public static Block ETHER_CRYSTAL_BLOCK;
     public static Item  ETHER_CRYSTAL_ITEM;
 
-    /** The single NBT-driven item used for all new Oddity Printer creations. */
+    /** Legacy NBT-driven item kept registered for existing Oddity stacks. */
     public static OddityItem ODDITY_ITEM_INSTANCE;
 
     public static BlockEntityType<ForgeBlockEntity>   FORGE_BE_TYPE;
@@ -157,7 +157,7 @@ public class AlchemodInit implements ModInitializer {
                         .nonOpaque().allowsSpawning((st, w, p, e) -> false)));
         ETHER_CRYSTAL_ITEM = registerBlockItem("ether_crystal", ETHER_CRYSTAL_BLOCK);
 
-        // ── OddityItem (single NBT-driven item; replaces the 64-slot pool) ────
+        // ── OddityItem (legacy NBT-driven item kept for existing worlds) ─────
         Identifier oddityId = Identifier.of(MOD_ID, "oddity");
         ODDITY_ITEM_INSTANCE = new OddityItem(
                 new Item.Settings()
@@ -165,7 +165,7 @@ public class AlchemodInit implements ModInitializer {
                         .registryKey(RegistryKey.of(RegistryKeys.ITEM, oddityId)));
         Registry.register(Registries.ITEM, oddityId, ODDITY_ITEM_INSTANCE);
         DynamicItemRegistry.registerOddity(ODDITY_ITEM_INSTANCE);
-        LOG.info("[Alchemod] Registered OddityItem — unlimited items, NBT-driven identity.");
+        LOG.info("[Alchemod] Registered legacy OddityItem for existing NBT-driven stacks.");
 
         // ── Legacy 64-slot pool (for items already in the world) ──────────────
         DynamicItemRegistry.register();

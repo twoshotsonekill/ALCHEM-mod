@@ -43,6 +43,7 @@ public final class ProceduralSpriteGenerator {
             case "throwable" -> drawThrowable(image, primary, secondary, accent, light, hash);
             case "spawn_item", "spawn_egg" -> drawSpawnItem(image, primary, secondary, accent, light, hash);
             case "food" -> drawFood(image, primary, secondary, accent, light, hash);
+            case "block" -> drawBlock(image, primary, secondary, accent, dark, light, hash);
             default -> drawArtifact(image, primary, secondary, accent, dark, light, hash);
         }
 
@@ -51,12 +52,32 @@ public final class ProceduralSpriteGenerator {
     }
 
     private static void drawSword(NativeImage image, int primary, int secondary, int accent, int light, int hash) {
-        rect(image, 7, 1, 9, 10, mix(primary, 0xFFFFFFFF, 0.55f));
-        rect(image, 8, 0, 8, 1, light);
-        rect(image, 4, 9, 12, 10, accent);
-        rect(image, 7, 11, 9, 14, secondary);
-        pixel(image, 7, 4, light);
-        pixel(image, 9, 7, mix(accent, 0xFFFFFFFF, 0.4f));
+        switch (Math.floorMod(hash, 3)) {
+            case 0 -> {
+                rect(image, 7, 1, 9, 10, mix(primary, 0xFFFFFFFF, 0.55f));
+                rect(image, 8, 0, 8, 1, light);
+                rect(image, 4, 9, 12, 10, accent);
+                rect(image, 7, 11, 9, 14, secondary);
+                pixel(image, 7, 4, light);
+                pixel(image, 9, 7, mix(accent, 0xFFFFFFFF, 0.4f));
+            }
+            case 1 -> {
+                rect(image, 7, 5, 9, 14, secondary);
+                rect(image, 5, 2, 11, 6, mix(primary, 0xFFFFFFFF, 0.35f));
+                rect(image, 4, 4, 6, 8, primary);
+                rect(image, 10, 4, 12, 7, primary);
+                pixel(image, 6, 2, light);
+                pixel(image, 11, 5, accent);
+            }
+            default -> {
+                line(image, 5, 14, 11, 2, secondary);
+                line(image, 6, 14, 12, 3, mix(secondary, 0xFFFFFFFF, 0.25f));
+                rect(image, 10, 1, 13, 4, mix(primary, 0xFFFFFFFF, 0.5f));
+                rect(image, 7, 10, 10, 11, accent);
+                pixel(image, 12, 2, light);
+                pixel(image, 8, 8, mix(accent, 0xFFFFFFFF, 0.35f));
+            }
+        }
     }
 
     private static void drawBow(NativeImage image, int primary, int secondary, int accent, int light, int hash) {
@@ -70,82 +91,257 @@ public final class ProceduralSpriteGenerator {
     }
 
     private static void drawTool(NativeImage image, int primary, int secondary, int accent, int light, int hash) {
-        rect(image, 7, 6, 9, 14, secondary);
-        rect(image, 5, 2, 11, 5, primary);
-        rect(image, 4, 3, 5, 6, primary);
-        rect(image, 11, 3, 12, 6, primary);
+        switch (Math.floorMod(hash, 3)) {
+            case 0 -> {
+                rect(image, 7, 6, 9, 14, secondary);
+                rect(image, 5, 2, 11, 5, primary);
+                rect(image, 4, 3, 5, 6, primary);
+                rect(image, 11, 3, 12, 6, primary);
+            }
+            case 1 -> {
+                line(image, 4, 13, 11, 5, secondary);
+                rect(image, 9, 3, 13, 6, primary);
+                rect(image, 12, 4, 13, 9, primary);
+            }
+            default -> {
+                rect(image, 6, 3, 9, 13, secondary);
+                rect(image, 4, 2, 11, 4, primary);
+                rect(image, 5, 12, 10, 14, accent);
+            }
+        }
         pixel(image, 6, 2, light);
         pixel(image, 10, 4, accent);
     }
 
     private static void drawPotion(NativeImage image, int primary, int secondary, int accent, int light, int hash) {
-        circle(image, 8, 10, 4, mix(primary, accent, 0.45f));
-        rect(image, 7, 5, 9, 7, mix(secondary, 0xFFFFFFFF, 0.35f));
-        rect(image, 6, 4, 10, 5, secondary);
+        switch (Math.floorMod(hash, 3)) {
+            case 0 -> {
+                circle(image, 8, 10, 4, mix(primary, accent, 0.45f));
+                rect(image, 7, 5, 9, 7, mix(secondary, 0xFFFFFFFF, 0.35f));
+                rect(image, 6, 4, 10, 5, secondary);
+            }
+            case 1 -> {
+                rect(image, 6, 6, 10, 13, mix(primary, accent, 0.45f));
+                rect(image, 7, 3, 9, 6, mix(secondary, 0xFFFFFFFF, 0.35f));
+                rect(image, 6, 2, 10, 3, secondary);
+                pixel(image, 5, 9, accent);
+            }
+            default -> {
+                circle(image, 7, 10, 4, mix(primary, accent, 0.35f));
+                rect(image, 10, 5, 12, 11, mix(secondary, 0xFFFFFFFF, 0.25f));
+                rect(image, 9, 4, 13, 5, secondary);
+                pixel(image, 11, 7, accent);
+            }
+        }
         pixel(image, 6, 8, light);
         pixel(image, 10, 12, mix(accent, 0xFFFFFFFF, 0.5f));
     }
 
     private static void drawWand(NativeImage image, int primary, int secondary, int accent, int light, int hash) {
-        line(image, 4, 13, 11, 3, secondary);
-        line(image, 5, 13, 12, 3, mix(secondary, 0xFFFFFFFF, 0.25f));
-        circle(image, 12, 3, 2, accent);
-        pixel(image, 12, 3, light);
+        switch (Math.floorMod(hash, 3)) {
+            case 0 -> {
+                line(image, 4, 13, 11, 3, secondary);
+                line(image, 5, 13, 12, 3, mix(secondary, 0xFFFFFFFF, 0.25f));
+                circle(image, 12, 3, 2, accent);
+                pixel(image, 12, 3, light);
+            }
+            case 1 -> {
+                rect(image, 7, 3, 9, 14, secondary);
+                rect(image, 5, 2, 11, 4, accent);
+                pixel(image, 6, 1, light);
+                pixel(image, 10, 1, light);
+            }
+            default -> {
+                line(image, 3, 12, 12, 12, secondary);
+                line(image, 8, 4, 8, 14, mix(secondary, 0xFFFFFFFF, 0.25f));
+                circle(image, 8, 4, 2, primary);
+                pixel(image, 8, 4, light);
+            }
+        }
         pixel(image, 3, 14, primary);
     }
 
     private static void drawCharm(NativeImage image, int primary, int secondary, int accent, int light, int hash) {
-        line(image, 5, 2, 11, 2, light);
-        line(image, 5, 2, 8, 6, light);
-        line(image, 11, 2, 8, 6, light);
-        circle(image, 8, 9, 4, primary);
-        circle(image, 8, 9, 2, secondary);
+        switch (Math.floorMod(hash, 3)) {
+            case 0 -> {
+                line(image, 5, 2, 11, 2, light);
+                line(image, 5, 2, 8, 6, light);
+                line(image, 11, 2, 8, 6, light);
+                circle(image, 8, 9, 4, primary);
+                circle(image, 8, 9, 2, secondary);
+            }
+            case 1 -> {
+                line(image, 4, 3, 12, 3, light);
+                rect(image, 5, 5, 11, 12, primary);
+                rect(image, 6, 6, 7, 8, secondary);
+                rect(image, 9, 6, 10, 8, secondary);
+                rect(image, 6, 10, 10, 11, accent);
+            }
+            default -> {
+                line(image, 6, 2, 10, 2, light);
+                rect(image, 5, 5, 11, 12, secondary);
+                rect(image, 6, 6, 10, 10, primary);
+                pixel(image, 8, 8, accent);
+            }
+        }
         pixel(image, 6, 7, accent);
         pixel(image, 9, 11, light);
     }
 
     private static void drawScroll(NativeImage image, int primary, int secondary, int accent, int light, int hash) {
-        rect(image, 4, 3, 12, 12, 0xFFE8D8A8);
-        rect(image, 3, 2, 13, 4, mix(secondary, 0xFFFFFFFF, 0.25f));
-        rect(image, 3, 11, 13, 13, mix(secondary, 0xFFFFFFFF, 0.25f));
-        line(image, 5, 6, 10, 6, primary);
-        line(image, 5, 8, 11, 8, accent);
+        switch (Math.floorMod(hash, 3)) {
+            case 0 -> {
+                rect(image, 4, 3, 12, 12, 0xFFE8D8A8);
+                rect(image, 3, 2, 13, 4, mix(secondary, 0xFFFFFFFF, 0.25f));
+                rect(image, 3, 11, 13, 13, mix(secondary, 0xFFFFFFFF, 0.25f));
+                line(image, 5, 6, 10, 6, primary);
+                line(image, 5, 8, 11, 8, accent);
+            }
+            case 1 -> {
+                rect(image, 5, 4, 11, 13, 0xFFE8D8A8);
+                rect(image, 4, 3, 12, 5, secondary);
+                rect(image, 6, 6, 10, 7, primary);
+                rect(image, 7, 10, 11, 11, accent);
+            }
+            default -> {
+                rect(image, 3, 5, 12, 10, 0xFFE8D8A8);
+                rect(image, 2, 4, 5, 11, secondary);
+                rect(image, 11, 4, 14, 11, secondary);
+                line(image, 5, 7, 10, 7, primary);
+                pixel(image, 8, 9, accent);
+            }
+        }
         pixel(image, 11, 4, light);
     }
 
     private static void drawThrowable(NativeImage image, int primary, int secondary, int accent, int light, int hash) {
-        circle(image, 8, 9, 5, mix(primary, 0xFF202028, 0.45f));
-        rect(image, 8, 3, 9, 5, secondary);
-        pixel(image, 8, 3, light);
+        switch (Math.floorMod(hash, 3)) {
+            case 0 -> {
+                circle(image, 8, 9, 5, mix(primary, 0xFF202028, 0.45f));
+                rect(image, 8, 3, 9, 5, secondary);
+                pixel(image, 8, 3, light);
+            }
+            case 1 -> {
+                rect(image, 5, 5, 11, 12, mix(primary, 0xFF202028, 0.25f));
+                rect(image, 6, 4, 10, 5, secondary);
+                rect(image, 7, 8, 9, 10, accent);
+            }
+            default -> {
+                rect(image, 4, 8, 8, 12, primary);
+                rect(image, 8, 5, 12, 9, secondary);
+                rect(image, 10, 3, 12, 5, accent);
+                pixel(image, 12, 3, light);
+            }
+        }
         pixel(image, 6, 7, mix(0xFFFFFFFF, primary, 0.3f));
         pixel(image, 10, 11, accent);
     }
 
     private static void drawSpawnItem(NativeImage image, int primary, int secondary, int accent, int light, int hash) {
-        circle(image, 8, 8, 6, primary);
-        rect(image, 3, 8, 13, 13, secondary);
-        circle(image, 7, 6, 2, accent);
+        switch (Math.floorMod(hash, 3)) {
+            case 0 -> {
+                circle(image, 8, 8, 6, primary);
+                rect(image, 3, 8, 13, 13, secondary);
+                circle(image, 7, 6, 2, accent);
+            }
+            case 1 -> {
+                circle(image, 8, 8, 6, secondary);
+                rect(image, 5, 3, 11, 12, primary);
+                pixel(image, 5, 5, accent);
+                pixel(image, 11, 8, accent);
+            }
+            default -> {
+                rect(image, 4, 4, 12, 12, primary);
+                circle(image, 8, 8, 4, secondary);
+                pixel(image, 6, 5, accent);
+                pixel(image, 10, 11, accent);
+            }
+        }
         pixel(image, 10, 10, light);
         pixel(image, 5, 11, mix(light, secondary, 0.4f));
     }
 
     private static void drawFood(NativeImage image, int primary, int secondary, int accent, int light, int hash) {
-        circle(image, 8, 9, 5, primary);
-        rect(image, 8, 3, 9, 5, secondary);
-        rect(image, 5, 4, 7, 5, accent);
+        switch (Math.floorMod(hash, 3)) {
+            case 0 -> {
+                circle(image, 8, 9, 5, primary);
+                rect(image, 8, 3, 9, 5, secondary);
+                rect(image, 5, 4, 7, 5, accent);
+            }
+            case 1 -> {
+                rect(image, 5, 6, 11, 12, primary);
+                rect(image, 4, 5, 12, 7, accent);
+                pixel(image, 8, 4, secondary);
+            }
+            default -> {
+                circle(image, 8, 8, 4, secondary);
+                rect(image, 5, 9, 11, 13, primary);
+                rect(image, 6, 6, 10, 7, accent);
+            }
+        }
         pixel(image, 6, 7, light);
         pixel(image, 10, 11, mix(primary, 0xFF000000, 0.25f));
     }
 
+    private static void drawBlock(NativeImage image, int primary, int secondary, int accent, int dark, int light, int hash) {
+        int dirt = mix(primary, 0xFF6B4A2C, 0.55f);
+        int metal = mix(secondary, 0xFFB8B8B8, 0.55f);
+        switch (Math.floorMod(hash, 3)) {
+            case 0 -> {
+                rect(image, 4, 6, 11, 13, dirt);
+                rect(image, 5, 4, 12, 6, mix(dirt, light, 0.25f));
+                rect(image, 11, 7, 13, 12, mix(dirt, dark, 0.25f));
+                rect(image, 5, 5, 11, 6, metal);
+                pixel(image, 8, 4, accent);
+            }
+            case 1 -> {
+                rect(image, 3, 5, 12, 12, dark);
+                rect(image, 4, 4, 11, 10, dirt);
+                rect(image, 5, 5, 10, 6, metal);
+                rect(image, 7, 7, 8, 8, accent);
+                pixel(image, 11, 11, mix(dirt, 0xFF000000, 0.3f));
+            }
+            default -> {
+                rect(image, 4, 5, 12, 13, dirt);
+                rect(image, 5, 4, 11, 5, metal);
+                rect(image, 6, 6, 10, 9, mix(dirt, dark, 0.2f));
+                line(image, 10, 4, 13, 2, accent);
+                pixel(image, 13, 2, light);
+            }
+        }
+        pixel(image, 5, 7, light);
+        pixel(image, 10, 12, mix(dark, accent, 0.3f));
+    }
+
     private static void drawArtifact(NativeImage image, int primary, int secondary, int accent, int dark, int light, int hash) {
-        if ((hash & 1) == 0) {
-            circle(image, 8, 8, 6, dark);
-            circle(image, 8, 8, 4, primary);
-            rect(image, 6, 5, 10, 7, secondary);
-        } else {
-            rect(image, 5, 2, 11, 13, dark);
-            rect(image, 6, 3, 10, 12, primary);
-            rect(image, 7, 5, 9, 9, secondary);
+        switch (Math.floorMod(hash, 5)) {
+            case 0 -> {
+                circle(image, 8, 8, 6, dark);
+                circle(image, 8, 8, 4, primary);
+                rect(image, 6, 5, 10, 7, secondary);
+            }
+            case 1 -> {
+                rect(image, 5, 2, 11, 13, dark);
+                rect(image, 6, 3, 10, 12, primary);
+                rect(image, 7, 5, 9, 9, secondary);
+            }
+            case 2 -> {
+                circle(image, 5, 5, 3, accent);
+                circle(image, 5, 5, 1, 0x00000000);
+                rect(image, 7, 5, 13, 6, primary);
+                rect(image, 11, 7, 13, 9, primary);
+            }
+            case 3 -> {
+                rect(image, 4, 4, 12, 12, dark);
+                rect(image, 5, 5, 11, 11, primary);
+                rect(image, 6, 6, 7, 8, secondary);
+                rect(image, 9, 6, 10, 8, secondary);
+            }
+            default -> {
+                rect(image, 6, 3, 10, 13, dark);
+                rect(image, 5, 2, 11, 5, primary);
+                rect(image, 7, 6, 9, 12, secondary);
+            }
         }
         pixel(image, 6, 6, light);
         pixel(image, 10, 10, accent);

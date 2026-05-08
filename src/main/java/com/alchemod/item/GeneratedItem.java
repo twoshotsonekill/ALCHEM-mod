@@ -4,9 +4,9 @@ import net.minecraft.item.Item;
 
 /**
  * Runtime-created generated item. It intentionally reuses OddityItem behavior:
- * identity, scripts, charges, and rendering data all live in stack NBT, so a
- * failed runtime registration can fall back to the pre-registered Oddity item
- * without changing behavior.
+ * identity, scripts, charges, and rendering data all live in stack NBT. The
+ * creator now requires this runtime item to register successfully; failures
+ * abort creation instead of emitting a template fallback.
  */
 public class GeneratedItem extends OddityItem {
 

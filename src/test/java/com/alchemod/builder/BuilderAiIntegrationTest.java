@@ -24,6 +24,9 @@ class BuilderAiIntegrationTest {
         assertTrue(systemPrompt.contains("voxel.exec"), "Should contain voxel.exec tool");
         assertTrue(systemPrompt.contains("simple_v1"), "Should reference simple_v1 palette");
         assertTrue(systemPrompt.contains("CRITICAL"), "Should have critical instructions");
+        assertTrue(systemPrompt.contains("MineBench-style spatial rules"), "Should include MineBench-style spatial rules");
+        assertTrue(systemPrompt.contains("real 3D object or scene"), "Should reject flat decoration");
+        assertTrue(systemPrompt.contains("helper roles deliberately"), "Should describe helper roles");
     }
 
     @Test
@@ -32,6 +35,18 @@ class BuilderAiIntegrationTest {
 
         assertNotNull(userPrompt);
         assertTrue(userPrompt.contains("A castle with towers"));
+        assertTrue(userPrompt.contains("true 3D object or scene"));
+        assertTrue(userPrompt.contains("Output ONLY the voxel.exec JSON object"));
+    }
+
+    @Test
+    void repairPromptPreservesMineBenchStyleQualityBar() {
+        String repairPrompt = BuilderPromptFactory.buildRepairSystemPrompt();
+
+        assertNotNull(repairPrompt);
+        assertTrue(repairPrompt.contains("MineBench-style"));
+        assertTrue(repairPrompt.contains("not a flat picture"));
+        assertTrue(repairPrompt.contains("at least three shape helpers"));
     }
 
     @Test
