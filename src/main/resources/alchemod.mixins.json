@@ -2,6 +2,9 @@
   "required": true,
   "package": "com.alchemod.mixin",
   "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "SimpleRegistryAccessor"
+  ],
   "client": [
     "HandledScreenAccessor",
     "ItemRendererMixin"

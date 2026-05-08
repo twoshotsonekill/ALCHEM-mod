@@ -52,6 +52,27 @@ public class BuilderScreen extends HandledScreen<BuilderScreenHandler> {
     }
 
     @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (promptField != null && promptField.isFocused()) {
+            if (promptField.keyPressed(keyCode, scanCode, modifiers)) {
+                return true;
+            }
+            if (client != null && client.options.inventoryKey.matchesKey(keyCode, scanCode)) {
+                return true;
+            }
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public boolean charTyped(char chr, int modifiers) {
+        if (promptField != null && promptField.isFocused() && promptField.charTyped(chr, modifiers)) {
+            return true;
+        }
+        return super.charTyped(chr, modifiers);
+    }
+
+    @Override
     protected void drawBackground(DrawContext context, float delta, int mouseX, int mouseY) {
         context.drawTexture(RenderLayer::getGuiTextured, BG,
                 x, y, 0, 0, backgroundWidth, backgroundHeight, 256, 256);

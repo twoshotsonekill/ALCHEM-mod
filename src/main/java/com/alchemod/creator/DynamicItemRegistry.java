@@ -3,11 +3,13 @@ package com.alchemod.creator;
 import com.alchemod.AlchemodInit;
 import com.alchemod.item.GeneratedItem;
 import com.alchemod.item.OddityItem;
+import com.alchemod.mixin.SimpleRegistryAccessor;
 import net.minecraft.item.Item;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.Registry;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
+import net.minecraft.registry.SimpleRegistry;
 import net.minecraft.util.Identifier;
 
 import java.util.ArrayList;
@@ -27,6 +29,7 @@ public final class DynamicItemRegistry {
     private static final List<DynamicItem> POOL = new ArrayList<>();
     private static final Map<Integer, CreatedItemMeta> META = new ConcurrentHashMap<>();
     private static final AtomicInteger NEXT_RUNTIME_ID = new AtomicInteger();
+    private static final Object RUNTIME_REGISTRY_LOCK = new Object();
 
     private static int nextSlot = 0;
 
@@ -101,7 +104,7 @@ public final class DynamicItemRegistry {
                             .registryKey(RegistryKey.of(RegistryKeys.ITEM, id)),
                     id.toString(),
                     meta.itemType());
-            Registry.register(Registries.ITEM, id, item);
+            registerRuntimeItemUnsafe(id, item);
             AlchemodInit.LOG.warn("[Creator] Runtime item injection succeeded for {}. This is unsafe and may not survive registry reloads.", id);
             return RuntimeItemResult.success(item, id);
         } catch (Throwable t) {
@@ -248,6 +251,38 @@ public final class DynamicItemRegistry {
             case "block" -> 8;
             default -> 1;
         };
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void registerRuntimeItemUnsafe(Identifier id, Item item) {
+        synchronized (RUNTIME_REGISTRY_LOCK) {
+            if (!(Registries.ITEM instanceof SimpleRegistry<?> rawRegistry)) {
+                throw new IllegalStateException("Item registry is not a SimpleRegistry");
+            }
+            if (!(rawRegistry instanceof SimpleRegistryAccessor accessor)) {
+                throw new IllegalStateException("Item registry accessor mixin is unavailable");
+            }
+
+            SimpleRegistry<Item> itemRegistry = (SimpleRegistry<Item>) rawRegistry;
+            boolean wasFrozen = accessor.alchemod$isFrozen();
+            boolean registered = false;
+
+            try {
+                if (wasFrozen) {
+                    accessor.alchemod$setFrozen(false);
+                }
+                Registry.register(Registries.ITEM, id, item);
+                registered = true;
+                if (wasFrozen) {
+                    itemRegistry.freeze();
+                }
+            } catch (Throwable t) {
+                if (wasFrozen && !registered) {
+                    accessor.alchemod$setFrozen(true);
+                }
+                throw t;
+            }
+        }
     }
 
     private static String sanitiseId(String name) {

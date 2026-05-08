@@ -73,6 +73,26 @@ public class ForgeScreen extends HandledScreen<ForgeScreenHandler> {
     }
 
     @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (handleFocusedFieldKeyPress(keyCode, scanCode, modifiers)) {
+            return true;
+        }
+        if (hasFocusedField() && client != null && client.options.inventoryKey.matchesKey(keyCode, scanCode)) {
+            return true;
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public boolean charTyped(char chr, int modifiers) {
+        if (charTyped(nameField, chr, modifiers) || charTyped(loreField, chr, modifiers)
+                || charTyped(enchantField, chr, modifiers)) {
+            return true;
+        }
+        return super.charTyped(chr, modifiers);
+    }
+
+    @Override
     protected void drawBackground(DrawContext context, float delta, int mouseX, int mouseY) {
         context.drawTexture(RenderLayer::getGuiTextured, BG,
                 x, y, 0, 0, backgroundWidth, backgroundHeight, 256, 256);
@@ -132,6 +152,28 @@ public class ForgeScreen extends HandledScreen<ForgeScreenHandler> {
         enchantField.setEditable(visible);
         applyButton.visible = visible;
         applyButton.active = visible;
+    }
+
+    private boolean handleFocusedFieldKeyPress(int keyCode, int scanCode, int modifiers) {
+        return keyPressed(nameField, keyCode, scanCode, modifiers)
+                || keyPressed(loreField, keyCode, scanCode, modifiers)
+                || keyPressed(enchantField, keyCode, scanCode, modifiers);
+    }
+
+    private boolean hasFocusedField() {
+        return isFocused(nameField) || isFocused(loreField) || isFocused(enchantField);
+    }
+
+    private static boolean keyPressed(TextFieldWidget field, int keyCode, int scanCode, int modifiers) {
+        return isFocused(field) && field.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    private static boolean charTyped(TextFieldWidget field, char chr, int modifiers) {
+        return isFocused(field) && field.charTyped(chr, modifiers);
+    }
+
+    private static boolean isFocused(TextFieldWidget field) {
+        return field != null && field.isVisible() && field.isFocused();
     }
 
     private void sendOverrides() {
