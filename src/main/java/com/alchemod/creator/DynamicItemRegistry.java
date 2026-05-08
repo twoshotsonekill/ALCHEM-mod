@@ -256,14 +256,12 @@ public final class DynamicItemRegistry {
     @SuppressWarnings("unchecked")
     private static void registerRuntimeItemUnsafe(Identifier id, Item item) {
         synchronized (RUNTIME_REGISTRY_LOCK) {
-            if (!(Registries.ITEM instanceof SimpleRegistry<?> rawRegistry)) {
+            if (!(Registries.ITEM instanceof SimpleRegistry<?>)) {
                 throw new IllegalStateException("Item registry is not a SimpleRegistry");
             }
-            if (!(rawRegistry instanceof SimpleRegistryAccessor accessor)) {
-                throw new IllegalStateException("Item registry accessor mixin is unavailable");
-            }
 
-            SimpleRegistry<Item> itemRegistry = (SimpleRegistry<Item>) rawRegistry;
+            SimpleRegistry<Item> itemRegistry = (SimpleRegistry<Item>) Registries.ITEM;
+            SimpleRegistryAccessor accessor = (SimpleRegistryAccessor) Registries.ITEM;
             boolean wasFrozen = accessor.alchemod$isFrozen();
             boolean registered = false;
 
