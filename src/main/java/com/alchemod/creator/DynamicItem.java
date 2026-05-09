@@ -51,6 +51,21 @@ public class DynamicItem extends Item {
         return slotIndex;
     }
 
+    // ── Display name ──────────────────────────────────────────────────────────
+
+    /**
+     * Read the custom name stored in NBT so the item displays correctly in
+     * inventory, tooltips, and chat rather than showing a raw translation key.
+     */
+    @Override
+    public Text getName(ItemStack stack) {
+        String name = readTag(stack, "creator_name");
+        if (name != null && !name.isBlank()) {
+            return Text.literal(name);
+        }
+        return super.getName(stack);
+    }
+
     // ── Right-click use ───────────────────────────────────────────────────────
 
     @Override
@@ -105,7 +120,7 @@ public class DynamicItem extends Item {
     // ── Tooltip ───────────────────────────────────────────────────────────────
 
     @Override
-    public void appendTooltip(ItemStack stack, Item.TooltipContext context,
+    public void appendTooltip(ItemStack stack, TooltipContext context,
             List<Text> tooltip, TooltipType type) {
 
         String description = readTag(stack, "creator_desc");
